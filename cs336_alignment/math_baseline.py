@@ -19,7 +19,7 @@ def evaluate_vllm(
 ) -> None:
     batch_size = 32
     num_batches = (len(prompts) + batch_size - 1) // batch_size
-    all_completions = []
+    responses = []
     for i in tqdm(range(num_batches)):
         batch_prompts = prompts[i * batch_size : (i + 1) * batch_size]
         outputs = vllm_model.generate(
@@ -28,12 +28,12 @@ def evaluate_vllm(
         )
         for output in outputs:
             gen_text: str = output.outputs[0].text
-            all_completions.append(gen_text)
+            responses.append(gen_text)
 
     all_rewards = []
     total_rewards = 0.0
-    for ground_truth, completion in zip(ground_truths, all_completions):
-        reward_dict = reward_fn(ground_truth, completion)
+    for ground_truth, resp in zip(ground_truths, responses):
+        reward_dict = reward_fn(resp, ground_truth)
         total_rewards += reward_dict.get("reward", 0.0)
         all_rewards.append(reward_dict)
 
@@ -42,7 +42,7 @@ def evaluate_vllm(
 
     eval_data = {
         "prompts": prompts,
-        "completions": all_completions,
+        "responses": responses,
         "ground_truths": ground_truths,
         "rewards": all_rewards,
     }
