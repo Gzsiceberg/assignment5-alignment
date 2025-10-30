@@ -3,6 +3,7 @@ from typing import Callable, List
 from datasets import load_dataset
 import datasets
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+from math_verify import parse, verify
 from tqdm import tqdm
 import regex as re
 import pickle
@@ -32,13 +33,20 @@ def evaluate_vllm(
 
     all_rewards = []
     total_rewards = 0.0
+    total_rewards_v2 = 0.0
     for ground_truth, resp in zip(ground_truths, responses):
         reward_dict = reward_fn(resp, ground_truth)
         total_rewards += reward_dict.get("reward", 0.0)
+        resp_answer = parse(resp)
+        is_correct = verify(resp_answer, ground_truth)
+        reward_dict["reward_v2"] = 1.0 if is_correct else 0.0
+        total_rewards_v2 += 1.0 if is_correct else 0.0
         all_rewards.append(reward_dict)
 
     avg_reward = total_rewards / len(prompts) if prompts else 0.0
+    avg_reward_v2 = total_rewards_v2 / len(prompts) if prompts else 0.0
     print(f"Average Reward over {len(prompts)} samples: {avg_reward}")
+    print(f"Average Reward v2 over {len(prompts)} samples: {avg_reward_v2}")
 
     eval_data = {
         "prompts": prompts,
@@ -71,12 +79,12 @@ def generate_prompt_and_gt(ds: datasets.Dataset) -> tuple[List[str], List[str]]:
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
-    prompts = []
-    ground_truths = []
+    prompts: List[str] = []
+    ground_truths: List[str] = []
     for t, data in tqdm(enumerate(ds)):
         question = data["question"]
         answer_text = data["answer"]
-        answer = extract_answer(answer_text)
+        answer: str = extract_answer(answer_text)
         assert answer is not None, f"Could not extract answer from: {answer_text}"
         full_prompt = prompt_templ.format(question)
         prompts.append(full_prompt)
