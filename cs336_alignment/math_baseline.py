@@ -30,7 +30,7 @@ def evaluate_vllm(
             gen_text: str = output.outputs[0].text
             all_completions.append(gen_text)
 
-    all_rewards = [] 
+    all_rewards = []
     total_rewards = 0.0
     for ground_truth, completion in zip(ground_truths, all_completions):
         reward_dict = reward_fn(ground_truth, completion)
@@ -47,10 +47,12 @@ def evaluate_vllm(
         "rewards": all_rewards,
     }
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
-        pickle.dump(eval_data, f) 
+        pickle.dump(eval_data, f)
 
 
 GSM_RE = re.compile(r"#### (\-?[0-9\.\,]+)")
+
+
 def extract_answer(completion):
     """
     Extract the numerical answer after #### marker.
@@ -65,23 +67,13 @@ def extract_answer(completion):
     return None
 
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=-1, help="Number of samples to evaluate on.")
-    args = parser.parse_args()
+def generate_prompt_and_gt(ds: datasets.Dataset) -> tuple[List[str], List[str]]:
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
-    os.makedirs("data", exist_ok=True)
-
-    ds = load_dataset("openai/gsm8k", "main")
-    train: datasets.Dataset = ds["train"]
-    if args.limit > 0:
-        train = train.select(range(args.limit))
     prompts = []
     ground_truths = []
-    for t, data in tqdm(enumerate(train)):
+    for t, data in tqdm(enumerate(ds)):
         question = data["question"]
         answer_text = data["answer"]
         answer = extract_answer(answer_text)
@@ -89,8 +81,26 @@ Assistant: <think>"""
         full_prompt = prompt_templ.format(question)
         prompts.append(full_prompt)
         ground_truths.append(answer)
+    return prompts, ground_truths
 
-    sampling_params = SamplingParams(temperature=1.0)
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--limit", type=int, default=-1, help="Number of samples to evaluate on."
+    )
+    args = parser.parse_args()
+    os.makedirs("data", exist_ok=True)
+
+    ds = load_dataset("openai/gsm8k", "main")
+    train: datasets.Dataset = ds["train"]
+    if args.limit > 0:
+        train = train.select(range(args.limit))
+
+    prompts, ground_truths = generate_prompt_and_gt(train)
+    sampling_params = SamplingParams(temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"])
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True
     model = LLM(model="models/Qwen/Qwen2.5-Math-1.5B")
@@ -103,12 +113,10 @@ Assistant: <think>"""
         eval_sampling_params=sampling_params,
     )
 
-
     import torch.distributed as dist
+
     if dist.is_available() and dist.is_initialized():
         try:
             dist.destroy_process_group()
         except Exception:
             pass
-    
-
