@@ -21,6 +21,9 @@ dependencies = [
     "wandb>=0.19.8",
     "xopen>=2.0.2",
     "black>=25.9.0",
+    "datasets>=2.19",
+    "fsspec>=2025.3.2",
+    "huggingface-hub>=0.31.1",
 ]
 
 [tool.setuptools.packages.find]
