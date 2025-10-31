@@ -1,14 +1,35 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers import PreTrainedTokenizerBase
+from transformers import PreTrainedTokenizerBase, PreTrainedModel
 import torch
 from datasets import load_dataset
 import datasets
 from tqdm import tqdm
 
 
+def get_response_log_probs(
+    model: PreTrainedModel,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    return_token_entropy: bool = False,
+) -> dict[str, torch.Tensor]:
+    logits = model(input_ids=input_ids).logits
+    log_probs = torch.log_softmax(logits, dim=-1)
+    log_probs_for_labels = torch.gather(
+        log_probs, dim=-1, index=labels.unsqueeze(-1)
+    ).squeeze(-1)
+
+    result: dict[str, torch.Tensor] = {"log_probs": log_probs_for_labels}
+    if return_token_entropy:
+        probs = torch.exp(log_probs)
+        entropy = -torch.sum(probs * log_probs, dim=-1)
+        result["token_entropy"] = entropy
+    return result
+
+
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
-    probs = torch.softmax(logits, dim=-1)
-    return -torch.sum(probs * torch.log(probs + 1e-12), dim=-1)
+    log_probs = torch.log_softmax(logits, dim=-1)
+    probs = torch.exp(log_probs)
+    return -torch.sum(probs * log_probs, dim=-1)
 
 
 def tokenize_prompt_and_output(
@@ -25,20 +46,27 @@ def tokenize_prompt_and_output(
         )
         prompt_tokens_list.append(prompt_tokens)
         output_tokens_list.append(output_tokens)
-    
+
     if __name__ == "__main__":
         from rich import print
+
         print(f"Max prompt and output length: {max_prompt_and_output_lens}")
         print(f"Sample prompt tokens: {prompt_tokens_list[0]}")
         print(f"Sample output tokens: {output_tokens_list[0]}")
         print(f"eos token id: {tokenizer.eos_token_id}")
-    
+
     batch_size = len(prompt_strs)
-    eos_token_id: int = tokenizer.eos_token_id # type: ignore
-    input_ids = torch.full((batch_size, max_prompt_and_output_lens - 1), eos_token_id, dtype=torch.int)
+    eos_token_id: int = tokenizer.eos_token_id  # type: ignore
+    input_ids = torch.full(
+        (batch_size, max_prompt_and_output_lens - 1), eos_token_id, dtype=torch.int
+    )
     labels = input_ids.clone()
-    response_mask = torch.zeros((batch_size, max_prompt_and_output_lens - 1), dtype=torch.bool)
-    for idx, (prompt_tokens, output_tokens) in tqdm(enumerate(zip(prompt_tokens_list, output_tokens_list))):
+    response_mask = torch.zeros(
+        (batch_size, max_prompt_and_output_lens - 1), dtype=torch.bool
+    )
+    for idx, (prompt_tokens, output_tokens) in tqdm(
+        enumerate(zip(prompt_tokens_list, output_tokens_list))
+    ):
         prompt_len = len(prompt_tokens)
         all_tokens = prompt_tokens + output_tokens
         if len(all_tokens) < max_prompt_and_output_lens:
@@ -53,6 +81,7 @@ def tokenize_prompt_and_output(
         labels[idx, : len(label)] = label
         response_mask[idx, prompt_len - 1 : len(label)] = True
     return {"input_ids": input_ids, "response_mask": response_mask, "labels": labels}
+
 
 def extract_prompt_and_response(ds: datasets.Dataset) -> tuple[list[str], list[str]]:
     prompts: list[str] = []
@@ -74,10 +103,11 @@ if __name__ == "__main__":
     train: datasets.Dataset = ds["train"]  # type: ignore
 
     prompts, responses = extract_prompt_and_response(train)
-    prompts = ['Hello, world!', 'This is a test.', 'This is another test.']
-    responses = ['Hello, world!', 'This is a test.', 'This is another test.']
+    prompts = ["Hello, world!", "This is a test.", "This is another test."]
+    responses = ["Hello, world!", "This is a test.", "This is another test."]
     tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
     from rich import print
+
     print(tokenized_data["input_ids"].shape)
     print(tokenized_data["response_mask"].shape)
     print(tokenized_data["labels"].shape)
