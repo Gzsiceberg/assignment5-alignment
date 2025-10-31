@@ -1,5 +1,5 @@
 from vllm import LLM, SamplingParams
-from typing import Callable, List
+from typing import Any, Callable, List
 from datasets import load_dataset
 import datasets
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
@@ -9,18 +9,32 @@ import regex as re
 import pickle
 import os
 from rich import print
+from dataclasses import dataclass
+
+
+
+@dataclass
+class EvalEntry:
+    prompt: str
+    response: str
+    parse_answer: str
+    ground_truth: str
+    reward: float
+    format_reward: float
+    answer_reward: float
+    answer_reward_v2: float
 
 
 def evaluate_vllm(
     vllm_model: LLM,
-    reward_fn: Callable[[str, str], dict[str, float]],
+    reward_fn: Callable[[str, Any], dict[str, float]],
     prompts: List[str],
     ground_truths: List[str],
     eval_sampling_params: SamplingParams,
 ) -> None:
     batch_size = 32
     num_batches = (len(prompts) + batch_size - 1) // batch_size
-    responses = []
+    responses: List[str] = []
     for i in tqdm(range(num_batches)):
         batch_prompts = prompts[i * batch_size : (i + 1) * batch_size]
         outputs = vllm_model.generate(
@@ -31,31 +45,39 @@ def evaluate_vllm(
             gen_text: str = output.outputs[0].text
             responses.append(gen_text)
 
-    all_rewards = []
-    total_rewards = 0.0
-    total_rewards_v2 = 0.0
+    eval_entries: List[EvalEntry] = []
     for ground_truth, resp in zip(ground_truths, responses):
         reward_dict = reward_fn(resp, ground_truth)
-        total_rewards += reward_dict.get("reward", 0.0)
+
         resp_answer = parse(resp)
-        is_correct = verify(resp_answer, ground_truth)
-        reward_dict["reward_v2"] = 1.0 if is_correct else 0.0
-        total_rewards_v2 += 1.0 if is_correct else 0.0
-        all_rewards.append(reward_dict)
+        gt_answer = parse(ground_truth)
+        is_correct = verify(resp_answer, gt_answer)
 
-    avg_reward = total_rewards / len(prompts) if prompts else 0.0
-    avg_reward_v2 = total_rewards_v2 / len(prompts) if prompts else 0.0
-    print(f"Average Reward over {len(prompts)} samples: {avg_reward}")
-    print(f"Average Reward v2 over {len(prompts)} samples: {avg_reward_v2}")
+        eval_entry = EvalEntry(
+            prompt=prompts[len(eval_entries)],
+            response=resp,
+            parse_answer=str(resp_answer),
+            ground_truth=ground_truth,
+            reward=reward_dict["reward"],
+            format_reward=reward_dict["format_reward"],
+            answer_reward=reward_dict["answer_reward"],
+            answer_reward_v2=1.0 if is_correct else 0.0,
+        )
+        eval_entries.append(eval_entry)
 
-    eval_data = {
-        "prompts": prompts,
-        "responses": responses,
-        "ground_truths": ground_truths,
-        "rewards": all_rewards,
-    }
+    total_rewards = sum([entry.reward for entry in eval_entries])
+    total_rewards_v2 = sum([entry.answer_reward_v2 for entry in eval_entries])
+    total_formatting_rewards = sum([entry.format_reward for entry in eval_entries])
+    total_entries = len(eval_entries)
+    avg_reward = total_rewards / total_entries if total_entries > 0 else 0.0
+    avg_reward_v2 = total_rewards_v2 / total_entries if total_entries > 0 else 0.0
+    avg_formatting_reward = total_formatting_rewards / total_entries if total_entries > 0 else 0.0
+    print(f"Average Reward over {total_entries} samples: {avg_reward}")
+    print(f"Average Reward v2 over {total_entries} samples: {avg_reward_v2}")
+    print(f"Average Formatting Reward over {total_entries} samples: {avg_formatting_reward}")
+
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
-        pickle.dump(eval_data, f)
+        pickle.dump(eval_entries, f)
 
 
 GSM_RE = re.compile(r"#### (\-?[0-9\.\,]+)")
@@ -80,16 +102,14 @@ def generate_prompt_and_gt(ds: datasets.Dataset) -> tuple[List[str], List[str]]:
 User: {0}
 Assistant: <think>"""
     prompts: List[str] = []
-    ground_truths: List[str] = []
+    responses: List[str] = []
     for t, data in tqdm(enumerate(ds)):
-        question = data["question"]
-        answer_text = data["answer"]
-        answer: str = extract_answer(answer_text)
-        assert answer is not None, f"Could not extract answer from: {answer_text}"
+        question: str = data["query"] # type: ignore
+        answer_text: str = data["response"] # type: ignore
         full_prompt = prompt_templ.format(question)
         prompts.append(full_prompt)
-        ground_truths.append(answer)
-    return prompts, ground_truths
+        responses.append(answer_text)
+    return prompts, responses
 
 
 if __name__ == "__main__":
@@ -102,20 +122,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.makedirs("data", exist_ok=True)
 
-    ds = load_dataset("openai/gsm8k", "main")
-    train: datasets.Dataset = ds["train"]
+    ds = load_dataset("hkust-nlp/dart-math-uniform")
+    train: datasets.Dataset = ds["train"] # type: ignore
     if args.limit > 0:
         train = train.select(range(args.limit))
 
     prompts, ground_truths = generate_prompt_and_gt(train)
-    sampling_params = SamplingParams(temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"])
+    sampling_params = SamplingParams(
+        temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
+    )
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True
     model = LLM(model="models/Qwen/Qwen2.5-Math-1.5B")
 
     evaluate_vllm(
         vllm_model=model,
-        reward_fn=r1_zero_reward_fn,
+        reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
         prompts=prompts,
         ground_truths=ground_truths,
         eval_sampling_params=sampling_params,

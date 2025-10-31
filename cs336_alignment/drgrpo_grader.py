@@ -623,8 +623,16 @@ def is_latex_equal(given_answer: str, ground_truth: str) -> bool:
                     given_answer = f"${given_answer}$"
                 if "$" not in ground_truth:
                     ground_truth = f"${ground_truth}$"
-                return verify(
-                    parse(
+                gold = parse( ground_truth,
+                        extraction_config=(
+                            LatexExtractionConfig(boxed_match_priority=0),
+                            ExprExtractionConfig(),
+                        ),
+                        fallback_mode="no_fallback",
+                        extraction_mode=["first_match"],
+                        parsing_timeout=1,
+                    )
+                target = parse(
                         ground_truth,
                         extraction_config=(
                             LatexExtractionConfig(boxed_match_priority=0),
@@ -633,19 +641,8 @@ def is_latex_equal(given_answer: str, ground_truth: str) -> bool:
                         fallback_mode="no_fallback",
                         extraction_mode=["first_match"],
                         parsing_timeout=1,
-                    ),
-                    parse(
-                        given_answer,
-                        extraction_config=(
-                            LatexExtractionConfig(boxed_match_priority=0),
-                            ExprExtractionConfig(),
-                        ),
-                        fallback_mode="no_fallback",
-                        extraction_mode=["first_match"],
-                        parsing_timeout=1,
-                    ),
-                    timeout_seconds=1,
-                )
+                    )
+                return verify( gold, target, timeout_seconds=1,)
                 # or symbolic_equal(ground_truth, given_answer)
             except Exception:
                 return False
@@ -1024,7 +1021,7 @@ def r1_zero_reward_fn(response, ground_truth, fast=True):
         elif isinstance(ground_truth, list):
             is_correct = False
             for gt in ground_truth:
-                is_correct |= grade(model_answer, gt, fast)
+                is_correct |= grade(model_answer, str(gt), fast)
         if is_correct:
             return {
                 "format_reward": 1.0,
