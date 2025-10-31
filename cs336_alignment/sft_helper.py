@@ -107,6 +107,49 @@ def tokenize_prompt_and_output(
         response_mask[idx, prompt_len - 1 : len(label)] = True
     return {"input_ids": input_ids, "response_mask": response_mask, "labels": labels}
 
+def log_generations(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
+                    prompts: list[str], ground_truths: list[str]):
+    import random
+    from rich import print
+    lenght = len(prompts)
+    index = random.randint(0, lenght - 1)
+    prompt = prompts[index]
+    gt = ground_truths[index]
+    print("=== Prompt ===")
+    print(prompt)
+
+    print("=== Response ===")
+    prompt_ids = tokenizer.encode(prompt)
+    model_input = torch.tensor([[prompt_ids]], dtype=torch.int, device=model.device)
+    generated_ids = model.generate(model_input, max_length=len(gt) * 2)
+    response = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+    print(response)
+
+    print("=== Ground Truth ===")
+    print(gt)
+
+    print("=== Reward ===")
+    from math_verify import parse, verify
+    from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+    reward_dict = r1_zero_reward_fn(response, gt, False)
+    resp_answer = parse(response)
+    gt_answer = parse(gt)
+    reward = reward_dict["reward"]
+    format_reward = reward_dict["format_reward"]
+    answer_reward_v2 = verify(resp_answer, gt_answer)
+    print(f"Reward={reward}, FormatReward={format_reward}, AnswerRewardV2={answer_reward_v2}")
+
+    print("=== Average Token Entropy ===")
+    logits = model(input_ids=model_input).logits
+    token_entropy = compute_entropy(logits)
+    avg_entropy = torch.sum(token_entropy) / token_entropy.numel()
+    print(f"Average Token Entropy: {avg_entropy.item()}")
+
+    print("=== End of Log ===")
+    resp_length = len(response)
+    gt_length = len(gt)
+    print(f"Response Length: {resp_length}, Ground Truth Length: {gt_length}")
+
 
 def extract_prompt_and_response(ds: datasets.Dataset) -> tuple[list[str], list[str]]:
     prompts: list[str] = []
