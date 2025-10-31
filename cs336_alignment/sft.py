@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     import datasets
     from datasets import load_dataset
-    from sft_helper import extract_prompt_and_response, tokenize_prompt_and_output
+    from sft_helper import extract_prompt_and_response, tokenize_to_tensor
     import os
 
     ds = load_dataset("hkust-nlp/dart-math-uniform")
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     prompts, responses = extract_prompt_and_response(train)
-    tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
+    tokenized_data = tokenize_to_tensor(prompts, responses, tokenizer)
     input_ids = tokenized_data["input_ids"].to(train_device)
     labels = tokenized_data["labels"].to(train_device)
     resp_mask = tokenized_data["response_mask"].to(train_device)

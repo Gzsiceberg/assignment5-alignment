@@ -57,13 +57,17 @@ def sft_microbatch_train_step(
     return loss, {}
 
 
-def tokenize_prompt_and_output(
+def _tokenize_data(
     prompt_strs: list[str], output_strs: list[str], tokenizer: PreTrainedTokenizerBase
-) -> dict[str, torch.Tensor]:
+):
     max_prompt_and_output_lens = 0
     prompt_tokens_list = []
     output_tokens_list = []
-    for prompt, output in tqdm(zip(prompt_strs, output_strs), total=len(prompt_strs), desc="Tokenizing prompts and outputs"):
+    for prompt, output in tqdm(
+        zip(prompt_strs, output_strs),
+        total=len(prompt_strs),
+        desc="Tokenizing prompts and outputs",
+    ):
         prompt_tokens = tokenizer.encode(prompt)
         output_tokens = tokenizer.encode(output)
         max_prompt_and_output_lens = max(
@@ -80,6 +84,57 @@ def tokenize_prompt_and_output(
         print(f"Sample output tokens: {output_tokens_list[0]}")
         print(f"eos token id: {tokenizer.eos_token_id}")
 
+    return prompt_tokens_list, output_tokens_list, max_prompt_and_output_lens
+
+def tokenize_to_np(prompt_strs: list[str], output_strs: list[str], tokenizer: PreTrainedTokenizerBase,
+                   data_type: str):
+    import numpy as np
+    prompt_tokens_list, output_tokens_list, max_prompt_and_output_lens = _tokenize_data(
+        prompt_strs, output_strs, tokenizer
+    )
+
+    batch_size = len(prompt_strs)
+    eos_token_id: int = tokenizer.eos_token_id  # type: ignore
+    input_ids = np.memmap(f"data/input_ids_{data_type}.npy", mode='w+', shape=(batch_size, max_prompt_and_output_lens - 1), dtype=np.int32)
+    input_ids.fill(eos_token_id)
+    labels = np.memmap(f"data/labels_{data_type}.npy", mode='w+', shape=(batch_size, max_prompt_and_output_lens - 1), dtype=np.int32)
+    labels.fill(eos_token_id)
+    response_mask = np.memmap(f"data/response_mask_{data_type}.npy", mode='w+', shape=(batch_size, max_prompt_and_output_lens - 1), dtype=bool)
+    response_mask.fill(False)
+
+    for idx, (prompt_tokens, output_tokens) in tqdm(
+        enumerate(zip(prompt_tokens_list, output_tokens_list)),
+        total=batch_size,
+        desc="Saving input_ids, labels, and response_mask",
+    ):
+        prompt_len = len(prompt_tokens)
+        all_tokens = prompt_tokens + output_tokens
+        if len(all_tokens) < max_prompt_and_output_lens:
+            input_tokens = all_tokens[:]
+            label_tokens = all_tokens[1:]
+        else:
+            input_tokens = all_tokens[:-1]
+            label_tokens = all_tokens[1:]
+        input_id = np.array(input_tokens, dtype=np.int32)
+        label = np.array(label_tokens, dtype=np.int32)
+        input_ids[idx, : len(input_id)] = input_id
+        labels[idx, : len(label)] = label
+        response_mask[idx, prompt_len - 1 : len(label)] = True
+
+    input_ids.flush()
+    labels.flush()
+    response_mask.flush()
+    del input_ids
+    del labels
+    del response_mask
+
+def tokenize_to_tensor(
+    prompt_strs: list[str], output_strs: list[str], tokenizer: PreTrainedTokenizerBase
+) -> dict[str, torch.Tensor]:
+    prompt_tokens_list, output_tokens_list, max_prompt_and_output_lens = _tokenize_data(
+        prompt_strs, output_strs, tokenizer
+    )
+
     batch_size = len(prompt_strs)
     eos_token_id: int = tokenizer.eos_token_id  # type: ignore
     input_ids = torch.full(
@@ -91,7 +146,8 @@ def tokenize_prompt_and_output(
     )
     for idx, (prompt_tokens, output_tokens) in tqdm(
         enumerate(zip(prompt_tokens_list, output_tokens_list)),
-        total=batch_size, desc="Creating input_ids, labels, and response_mask",
+        total=batch_size,
+        desc="Creating input_ids, labels, and response_mask",
     ):
         prompt_len = len(prompt_tokens)
         all_tokens = prompt_tokens + output_tokens
@@ -108,10 +164,16 @@ def tokenize_prompt_and_output(
         response_mask[idx, prompt_len - 1 : len(label)] = True
     return {"input_ids": input_ids, "response_mask": response_mask, "labels": labels}
 
-def log_generations(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
-                    prompts: list[str], ground_truths: list[str]):
+
+def log_generations(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    prompts: list[str],
+    ground_truths: list[str],
+):
     import random
     from rich import print
+
     lenght = len(prompts)
     index = random.randint(0, lenght - 1)
     prompt = prompts[index]
@@ -132,13 +194,16 @@ def log_generations(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
     print("=== Reward ===")
     from math_verify import parse, verify
     from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+
     reward_dict = r1_zero_reward_fn(response, gt, False)
     resp_answer = parse(response)
     gt_answer = parse(gt)
     reward = reward_dict["reward"]
     format_reward = reward_dict["format_reward"]
     answer_reward_v2 = verify(resp_answer, gt_answer)
-    print(f"Reward={reward}, FormatReward={format_reward}, AnswerRewardV2={answer_reward_v2}")
+    print(
+        f"Reward={reward}, FormatReward={format_reward}, AnswerRewardV2={answer_reward_v2}"
+    )
 
     print("=== Average Token Entropy ===")
     logits = model(input_ids=model_input).logits
@@ -154,6 +219,7 @@ def log_generations(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
 
 def extract_prompt_and_response(ds: datasets.Dataset) -> tuple[list[str], list[str]]:
     from cs336_alignment.extract import extract_ans
+
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
@@ -171,9 +237,11 @@ Assistant: <think>"""
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--type", type=str, default="train")
+    parser.add_argument("--to-np", action="store_true", help="Store tokenized data as numpy memmap files")
     args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained("./models/Qwen/Qwen2.5-Math-1.5B")
 
@@ -184,21 +252,15 @@ if __name__ == "__main__":
         ds = ds.select(range(args.limit))
 
     prompts, responses = extract_prompt_and_response(ds)
-    tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
+
+    if args.to_np:
+        tokenize_to_np(prompts, responses, tokenizer, data_type)
+        exit(0)
+
+    tokenized_data = tokenize_to_tensor(prompts, responses, tokenizer)
     input_ids = tokenized_data["input_ids"]
     response_mask = tokenized_data["response_mask"]
     labels = tokenized_data["labels"]
-
-    if args.limit < 0:
-        import numpy as np  
-        import os
-        os.makedirs("data", exist_ok=True)
-        data = input_ids.numpy()
-        np.save(f"data/input_ids_{data_type}.npy", data)
-        data = response_mask.numpy()
-        np.save(f"data/response_mask_{data_type}.npy", data)
-        data = labels.numpy()
-        np.save(f"data/labels_{data_type}.npy", data)
 
     from rich import print
     print(input_ids.shape)

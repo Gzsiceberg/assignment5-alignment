@@ -113,7 +113,7 @@ if __name__ == "__main__":
 
     prompts, ground_truths = generate_prompt_and_gt(train)
     sampling_params = SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=1024, stop=["\n"]
+        temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
     )
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True

@@ -31,8 +31,8 @@ def run_tokenize_prompt_and_output(
             "response_mask": torch.Tensor of shape (batch_size, max(prompt_and_output_lens) - 1):
                 a mask on the response tokens in `labels`.
     """
-    from cs336_alignment.sft_helper import tokenize_prompt_and_output
-    return tokenize_prompt_and_output(prompt_strs, output_strs, tokenizer)
+    from cs336_alignment.sft_helper import tokenize_to_tensor
+    return tokenize_to_tensor(prompt_strs, output_strs, tokenizer)
 
 
 def run_compute_group_normalized_rewards(
