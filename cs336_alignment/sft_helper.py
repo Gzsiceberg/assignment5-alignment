@@ -6,7 +6,6 @@ import datasets
 from tqdm import tqdm
 
 
-
 def masked_normalize(
     tensor: torch.Tensor,
     mask: torch.Tensor,
@@ -55,7 +54,7 @@ def sft_microbatch_train_step(
     loss /= gradient_accumulation_steps
     loss /= batch_size
     loss.backward()
-    return loss, {} 
+    return loss, {}
 
 
 def tokenize_prompt_and_output(
