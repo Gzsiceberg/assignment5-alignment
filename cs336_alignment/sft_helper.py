@@ -63,7 +63,7 @@ def tokenize_prompt_and_output(
     max_prompt_and_output_lens = 0
     prompt_tokens_list = []
     output_tokens_list = []
-    for prompt, output in tqdm(zip(prompt_strs, output_strs)):
+    for prompt, output in tqdm(zip(prompt_strs, output_strs), total=len(prompt_strs), desc="Tokenizing prompts and outputs"):
         prompt_tokens = tokenizer.encode(prompt)
         output_tokens = tokenizer.encode(output)
         max_prompt_and_output_lens = max(
@@ -90,7 +90,8 @@ def tokenize_prompt_and_output(
         (batch_size, max_prompt_and_output_lens - 1), dtype=torch.bool
     )
     for idx, (prompt_tokens, output_tokens) in tqdm(
-        enumerate(zip(prompt_tokens_list, output_tokens_list))
+        enumerate(zip(prompt_tokens_list, output_tokens_list)),
+        total=batch_size, desc="Creating input_ids, labels, and response_mask",
     ):
         prompt_len = len(prompt_tokens)
         all_tokens = prompt_tokens + output_tokens
@@ -158,7 +159,7 @@ User: {0}
 Assistant: <think>"""
     prompts: list[str] = []
     responses: list[str] = []
-    for data in ds:
+    for data in tqdm(ds, total=len(ds), desc="Extracting prompts and responses"):
         question: str = data["query"]  # type: ignore
         resp: str = data["response"]  # type: ignore
         answer = extract_ans(resp, False)
@@ -169,16 +170,37 @@ Assistant: <think>"""
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=-1)
+    parser.add_argument("--type", type=str, default="train")
+    args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained("./models/Qwen/Qwen2.5-Math-1.5B")
 
-    ds = load_dataset("hkust-nlp/dart-math-uniform")
-    train: datasets.Dataset = ds["train"]  # type: ignore
+    data_math = load_dataset("hkust-nlp/dart-math-uniform")
+    data_type: str = args.type
+    ds: datasets.Dataset = data_math[data_type]  # type: ignore
+    if args.limit > 0:
+        ds = ds.select(range(args.limit))
 
-    prompts, responses = extract_prompt_and_response(train)
+    prompts, responses = extract_prompt_and_response(ds)
     tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
-    from rich import print
+    input_ids = tokenized_data["input_ids"]
+    response_mask = tokenized_data["response_mask"]
+    labels = tokenized_data["labels"]
 
-    print(tokenized_data["input_ids"].shape)
-    print(tokenized_data["response_mask"].shape)
-    print(tokenized_data["labels"].shape)
-    print(tokenized_data)
+    if args.limit < 0:
+        import numpy as np  
+        import os
+        os.makedirs("data", exist_ok=True)
+        data = input_ids.numpy()
+        np.save(f"data/input_ids_{data_type}.npy", data)
+        data = response_mask.numpy()
+        np.save(f"data/response_mask_{data_type}.npy", data)
+        data = labels.numpy()
+        np.save(f"data/labels_{data_type}.npy", data)
+
+    from rich import print
+    print(input_ids.shape)
+    print(response_mask.shape)
+    print(labels.shape)
