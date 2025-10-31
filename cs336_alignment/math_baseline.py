@@ -79,25 +79,8 @@ def evaluate_vllm(
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
 
-
-GSM_RE = re.compile(r"#### (\-?[0-9\.\,]+)")
-
-
-def extract_answer(completion):
-    """
-    Extract the numerical answer after #### marker.
-    Follows official code for normalization:
-    https://github.com/openai/grade-school-math/blob/3101c7d5072418e28b9008a6636bde82a006892c/grade_school_math/dataset.py#L28
-    """
-    match = GSM_RE.search(completion)
-    if match:
-        match_str = match.group(1).strip()
-        match_str = match_str.replace(",", "")
-        return match_str
-    return None
-
-
 def generate_prompt_and_gt(ds: datasets.Dataset) -> tuple[List[str], List[str]]:
+    from cs336_alignment.extract import extract_ans
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
@@ -151,3 +134,6 @@ if __name__ == "__main__":
             dist.destroy_process_group()
         except Exception:
             pass
+
+
+# %%
