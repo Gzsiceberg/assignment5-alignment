@@ -46,7 +46,7 @@ def evaluate_vllm(
             responses.append(gen_text)
 
     eval_entries: List[EvalEntry] = []
-    for ground_truth, resp in zip(ground_truths, responses):
+    for ground_truth, resp in tqdm(zip(ground_truths, responses)):
         reward_dict = reward_fn(resp, ground_truth)
 
         resp_answer = parse(resp)
