@@ -29,17 +29,21 @@ def tokenize_prompt_and_output(
         print(f"eos token id: {tokenizer.eos_token_id}")
     
     batch_size = len(prompt_strs)
-    input_ids = torch.zeros((batch_size, max_prompt_and_output_lens - 1), dtype=torch.int)
+    eos_token_id: int = tokenizer.eos_token_id # type: ignore
+    input_ids = torch.full((batch_size, max_prompt_and_output_lens - 1), eos_token_id, dtype=torch.int)
     labels = input_ids.clone()
     response_mask = torch.zeros((batch_size, max_prompt_and_output_lens - 1), dtype=torch.bool)
-    eos_token_id: int = tokenizer.eos_token_id # type: ignore
     for idx, (prompt_tokens, output_tokens) in tqdm(enumerate(zip(prompt_tokens_list, output_tokens_list))):
         prompt_len = len(prompt_tokens)
         all_tokens = prompt_tokens + output_tokens
         if len(all_tokens) < max_prompt_and_output_lens:
-            all_tokens.append(eos_token_id)
-        input_id = torch.tensor(all_tokens[:-1], dtype=torch.int)
-        label = torch.tensor(all_tokens[1:], dtype=torch.int)
+            input_tokens = all_tokens[:]
+            label_tokens = all_tokens[1:]
+        else:
+            input_tokens = all_tokens[:-1]
+            label_tokens = all_tokens[1:]
+        input_id = torch.tensor(input_tokens, dtype=torch.int)
+        label = torch.tensor(label_tokens, dtype=torch.int)
         input_ids[idx, : len(input_id)] = input_id
         labels[idx, : len(label)] = label
         response_mask[idx, prompt_len - 1 : len(label)] = True
@@ -65,6 +69,8 @@ if __name__ == "__main__":
     train: datasets.Dataset = ds["train"]  # type: ignore
 
     prompts, responses = extract_prompt_and_response(train)
+    prompts = ['Hello, world!', 'This is a test.', 'This is another test.']
+    responses = ['Hello, world!', 'This is a test.', 'This is another test.']
     tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
     from rich import print
     print(tokenized_data["input_ids"].shape)
