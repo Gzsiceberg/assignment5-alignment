@@ -6,6 +6,7 @@ import datasets
 from tqdm import tqdm
 
 
+
 def masked_normalize(
     tensor: torch.Tensor,
     mask: torch.Tensor,
@@ -40,6 +41,21 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     log_probs = torch.log_softmax(logits, dim=-1)
     probs = torch.exp(log_probs)
     return -torch.sum(probs * log_probs, dim=-1)
+
+
+def sft_microbatch_train_step(
+    policy_log_probs: torch.Tensor,
+    response_mask: torch.Tensor,
+    gradient_accumulation_steps: int,
+    normalize_constant: float = 1.0,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+
+    batch_size = policy_log_probs.shape[0]
+    loss = -masked_normalize(policy_log_probs, response_mask, normalize_constant)
+    loss /= gradient_accumulation_steps
+    loss /= batch_size
+    loss.backward()
+    return loss, {} 
 
 
 def tokenize_prompt_and_output(
