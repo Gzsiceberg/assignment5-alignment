@@ -152,15 +152,19 @@ def log_generations(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase,
 
 
 def extract_prompt_and_response(ds: datasets.Dataset) -> tuple[list[str], list[str]]:
+    from cs336_alignment.extract import extract_ans
+    prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
+User: {0}
+Assistant: <think>"""
     prompts: list[str] = []
     responses: list[str] = []
     for data in ds:
         question: str = data["query"]  # type: ignore
         resp: str = data["response"]  # type: ignore
-        prompts.append(question)
-        responses.append(resp)
-        if len(prompts) > 32:
-            break
+        answer = extract_ans(resp, False)
+        assert answer is not None, f"Failed to extract answer from response: {resp}"
+        prompts.append(prompt_templ.format(question))
+        responses.append(f"{resp} </think> <answer> {answer} </answer>")
     return prompts, responses
 
 
@@ -171,8 +175,6 @@ if __name__ == "__main__":
     train: datasets.Dataset = ds["train"]  # type: ignore
 
     prompts, responses = extract_prompt_and_response(train)
-    prompts = ["Hello, world!", "This is a test.", "This is another test."]
-    responses = ["Hello, world!", "This is a test.", "This is another test."]
     tokenized_data = tokenize_prompt_and_output(prompts, responses, tokenizer)
     from rich import print
 
