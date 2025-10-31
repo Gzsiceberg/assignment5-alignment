@@ -6,6 +6,11 @@ import datasets
 from tqdm import tqdm
 
 
+def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
+    probs = torch.softmax(logits, dim=-1)
+    return -torch.sum(probs * torch.log(probs + 1e-12), dim=-1)
+
+
 def tokenize_prompt_and_output(
     prompt_strs: list[str], output_strs: list[str], tokenizer: PreTrainedTokenizerBase
 ) -> dict[str, torch.Tensor]:
