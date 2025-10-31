@@ -6,6 +6,16 @@ import datasets
 from tqdm import tqdm
 
 
+def masked_normalize(
+    tensor: torch.Tensor,
+    mask: torch.Tensor,
+    normalize_constant: float,
+    dim: int | None = None,
+) -> torch.Tensor:
+    sum_tensor = torch.sum(tensor * mask, dim=dim)
+    return sum_tensor / normalize_constant
+
+
 def get_response_log_probs(
     model: PreTrainedModel,
     input_ids: torch.Tensor,
