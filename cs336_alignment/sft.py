@@ -209,6 +209,7 @@ if __name__ == "__main__":
     )
 
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
+        total_loss = torch.tensor(0.0, device=train_device)
         for _ in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
             random_index = np.random.randint(0, sample_count, size=batch_size)
             batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
@@ -224,12 +225,14 @@ if __name__ == "__main__":
                 loss, meta_data = sft_microbatch_train_step(
                     log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
                 )
+                total_loss += loss.detach()
 
+        total_loss = total_loss / gradient_accumulation_steps
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
         current_lr = lr_scheduler.get_last_lr()[0] 
-        pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {current_lr:.6f}") # type: ignore
+        pbar.set_description(f"Loss: {total_loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {current_lr:.6f}") # type: ignore
         
         is_last_step = st == training_steps - 1
         if vllm_model is not None and ((st + 1) % eval_interval == 0 or is_last_step):
