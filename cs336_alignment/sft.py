@@ -100,8 +100,9 @@ def eval_loss(
             batch_input_ids = batch_input_ids.to(train_device)
             batch_labels = batch_labels.to(train_device)
             batch_resp_mask = batch_resp_mask.to(train_device)
+
             results = get_response_log_probs(
-                llm, batch_input_ids, batch_labels, return_token_entropy=True
+                llm, batch_input_ids, batch_labels, return_token_entropy=False
             )
             log_probs = results["log_probs"]
             loss = sft_microbatch_eval_step(log_probs, batch_resp_mask, normalize_constant=1.0)
