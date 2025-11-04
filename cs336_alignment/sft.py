@@ -152,14 +152,14 @@ if __name__ == "__main__":
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True
 
-    if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
-        from datasets import load_dataset
-        ds = load_dataset("hkust-nlp/dart-math-uniform")
-        train: datasets.Dataset = ds["train"] # type: ignore
-        train = train.select(range(1024, 1024 + 512))  # use a small subset for eval
-        print(f"Total test samples: {len(train)}")
-        prompts, ground_truths = generate_prompt_and_gt(train)
+    from datasets import load_dataset
+    ds = load_dataset("hkust-nlp/dart-math-uniform")
+    train: datasets.Dataset = ds["train"] # type: ignore
+    train = train.select(range(1024, 1024 + 512))  # use a small subset for eval
+    print(f"Total test samples: {len(train)}")
+    prompts, ground_truths = generate_prompt_and_gt(train)
 
+    if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
         vllm_model = init_vllm(
             model_id="models/Qwen/Qwen2.5-Math-1.5B",
             device="cuda:1",
@@ -248,6 +248,18 @@ if __name__ == "__main__":
     print_and_log(
         f"Training time for {training_steps} steps: {end_time - start_time} seconds."
     )
+
+
+    from cs336_alignment.sft_helper import log_generations
+    for _ in range(10):
+        log_generations(
+            llm,
+            tokenizer,
+            prompts,
+            ground_truths,
+        )
+
+
     logging.shutdown()
     import torch.distributed as dist
 
