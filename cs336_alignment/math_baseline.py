@@ -121,9 +121,10 @@ if __name__ == "__main__":
 
     ds = load_dataset("hkust-nlp/dart-math-uniform")
     train: datasets.Dataset = ds["train"] # type: ignore
-    print(f"Total training samples: {len(train)}")
     if args.limit > 0:
+        print(f"Selecting samples from {args.offset} to {args.offset + args.limit}")
         train = train.select(range(args.offset, args.limit + args.offset))
+    print(f"Total training samples: {len(train)}")
     
     import torch
     gpu_count = torch.cuda.device_count()
