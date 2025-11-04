@@ -221,8 +221,9 @@ def log_generations(
 
     print("=== Response ===")
     prompt_ids = tokenizer.encode(prompt)
-    model_input = torch.tensor([[prompt_ids]], dtype=torch.int, device=model.device)
-    generated_ids = model.generate(model_input, max_length=len(gt) * 2)
+    model_input = torch.tensor([prompt_ids], dtype=torch.int, device=model.device)
+    assert model_input.ndim == 2 and model_input.shape[0] == 1
+    generated_ids = model.generate(model_input, max_length=4096)
     response = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
     print(response)
 
