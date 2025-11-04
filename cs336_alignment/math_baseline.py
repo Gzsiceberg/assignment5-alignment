@@ -5,11 +5,11 @@ import datasets
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 from math_verify import parse, verify
 from tqdm import tqdm
-import regex as re
 import pickle
 import os
 from rich import print
 from dataclasses import dataclass
+import torch
 
 
 
@@ -34,6 +34,12 @@ def evaluate_vllm(
     dump_data: bool = True,
 ) -> None:
     batch_size = 32
+    # get gpu memory maximum
+    gpu_memory_max = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)  # in GB
+    if gpu_memory_max >= 48:
+        batch_size = 128
+    elif gpu_memory_max >= 24:
+        batch_size = 64
     num_batches = (len(prompts) + batch_size - 1) // batch_size
     responses: List[str] = []
     for i in tqdm(range(num_batches), desc="generating responses"):
