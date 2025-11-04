@@ -2,7 +2,7 @@ from huggingface_hub import snapshot_download
 
 
 if __name__ == "__main__":
-    models = ["Qwen/Qwen2.5-Math-1.5B",]
+    models = ["Qwen/Qwen2.5-Math-1.5B", "Qwen/Qwen2.5-0.5B"]
     for model in models:
         print(f"Downloading {model}...")
         snapshot_download(
