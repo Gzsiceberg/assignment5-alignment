@@ -2,4 +2,5 @@ num_epochs: 5
 learning_rate: 5e-5
 gradient_accumulation_steps: 16
 micro_batch_size: 4
+max_examples: 128
 compile_model: True
