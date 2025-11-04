@@ -225,7 +225,7 @@ if __name__ == "__main__":
         if (epoch + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
-            pbar.set_description(f"SFT Epoch {epoch+1} | Loss: {loss.item():.4f}")
+            pbar.set_description(f"Loss: {loss.item():.4f}")
         
         is_last_step = epoch == sft_config.num_epochs - 1
         
@@ -240,7 +240,7 @@ if __name__ == "__main__":
                 sampling_params,
                 dump_data=False
             )
-        elif time.time() - start_time > 60:
+        elif time.time() - start_time > 60 or is_last_step:
             eval_loss_value = eval_loss(
                 llm,
                 input_ids,
