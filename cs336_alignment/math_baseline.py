@@ -106,6 +106,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--limit", type=int, default=-1, help="Number of samples to evaluate on."
     )
+    parser.add_argument(
+        "--offset", type=int, default=0, help="Offset for selecting samples."
+    )
     args = parser.parse_args()
     os.makedirs("data", exist_ok=True)
 
@@ -113,7 +116,7 @@ if __name__ == "__main__":
     train: datasets.Dataset = ds["train"] # type: ignore
     print(f"Total training samples: {len(train)}")
     if args.limit > 0:
-        train = train.select(range(args.limit))
+        train = train.select(range(args.limit) + args.offset)
 
     prompts, ground_truths = generate_prompt_and_gt(train)
     sampling_params = SamplingParams(
