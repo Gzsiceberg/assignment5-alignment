@@ -6,7 +6,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of models to download")
     args = parser.parse_args()
-    models = ["Qwen/Qwen2.5-Math-1.5B", "Qwen/Qwen2.5-0.5B", "Qwen/Qwen2-Math-1.5B"]
+    models = ["Qwen/Qwen2.5-Math-1.5B", "Qwen/Qwen2.5-0.5B", "Qwen/Qwen2-Math-1.5B", "Qwen/Qwen2-1.5B"]
     for i, model in enumerate(models):
         if args.limit is not None and i >= args.limit:
             break
