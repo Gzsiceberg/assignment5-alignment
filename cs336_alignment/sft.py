@@ -53,11 +53,13 @@ def get_batch(
     batch_size: int,
     context_length: int,
     limit_samples: int = -1,
+    base: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     sample_count = input_ids.shape[0] - context_length
     if limit_samples > 0:
         sample_count = min(limit_samples, sample_count)
-    start_idx = np.random.randint(0, sample_count, size=batch_size)
+    assert limit_samples + base + context_length <= input_ids.shape[0]
+    start_idx = np.random.randint(0, sample_count, size=batch_size) + base
 
     start_idx = rearrange(start_idx, "batch -> batch 1")
     idx_range = np.arange(context_length)
@@ -76,6 +78,33 @@ def get_batch(
         torch.from_numpy(batch_labels),
         torch.from_numpy(batch_resp_mask),
     )
+
+
+def eval_loss(
+    llm: PreTrainedModel,
+    input_ids: np.ndarray,
+    labels: np.ndarray,
+    resp_mask: np.ndarray,
+    batch_size: int,
+    context_length: int,
+) -> float:
+    from cs336_alignment.sft_helper import get_response_log_probs, sft_microbatch_eval_step
+    with torch.no_grad():
+        total_loss = torch.tensor(0.0, device=train_device)
+        for _ in range(512):
+            batch_input_ids, batch_labels, batch_resp_mask = get_batch(
+                input_ids, labels, resp_mask, batch_size, context_length, sft_config.limit, base=4096
+            )
+            batch_input_ids = batch_input_ids.to(train_device)
+            batch_labels = batch_labels.to(train_device)
+            batch_resp_mask = batch_resp_mask.to(train_device)
+            results = get_response_log_probs(
+                llm, batch_input_ids, batch_labels, return_token_entropy=True
+            )
+            log_probs = results["log_probs"]
+            loss = sft_microbatch_eval_step(log_probs, batch_resp_mask, normalize_constant=1.0)
+            total_loss += loss
+    return total_loss.item()
 
 
 if __name__ == "__main__":
@@ -144,7 +173,8 @@ if __name__ == "__main__":
     if sft_config.eval_interval > 0:
         from datasets import load_dataset
         ds = load_dataset("hkust-nlp/dart-math-uniform")
-        test: datasets.Dataset = ds["test"] # type: ignore
+        test: datasets.Dataset = ds["train"] # type: ignore
+        test = test.select([i for i in list(range(len(test))) if i >= len(test) - 1024])
         print(f"Total test samples: {len(test)}")
         prompts, ground_truths = generate_prompt_and_gt(test)
 
@@ -210,6 +240,16 @@ if __name__ == "__main__":
                 sampling_params,
                 dump_data=False
             )
+        elif time.time() - start_time > 60:
+            eval_loss_value = eval_loss(
+                llm,
+                input_ids,
+                labels,
+                resp_mask,
+                batch_size,
+                context_length,
+            )
+            print_and_log(f"Intermediate eval loss: {eval_loss_value:.4f}")
 
     
     llm.save_pretrained(save_directory=output_dir)

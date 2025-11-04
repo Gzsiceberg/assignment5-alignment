@@ -61,6 +61,18 @@ def sft_microbatch_train_step(
     return loss, {}
 
 
+def sft_microbatch_eval_step(
+    policy_log_probs: torch.Tensor,
+    response_mask: torch.Tensor,
+    normalize_constant: float = 1.0,
+) -> torch.Tensor:
+
+    batch_size = policy_log_probs.shape[0]
+    loss = -masked_normalize(policy_log_probs, response_mask, normalize_constant)
+    loss /= batch_size
+    return loss
+
+
 def _tokenize_data(
     prompt_strs: list[str], output_strs: list[str], tokenizer: PreTrainedTokenizerBase
 ):
@@ -90,20 +102,41 @@ def _tokenize_data(
 
     return prompt_tokens_list, output_tokens_list, max_prompt_and_output_lens
 
-def tokenize_to_np(prompt_strs: list[str], output_strs: list[str], tokenizer: PreTrainedTokenizerBase,
-                   data_type: str):
+
+def tokenize_to_np(
+    prompt_strs: list[str],
+    output_strs: list[str],
+    tokenizer: PreTrainedTokenizerBase,
+    data_type: str,
+):
     import numpy as np
+
     prompt_tokens_list, output_tokens_list, max_prompt_and_output_lens = _tokenize_data(
         prompt_strs, output_strs, tokenizer
     )
 
     batch_size = len(prompt_strs)
     eos_token_id: int = tokenizer.eos_token_id  # type: ignore
-    input_ids = np.memmap(f"data/input_ids_{data_type}.npy", mode='w+', shape=(batch_size, max_prompt_and_output_lens - 1), dtype=np.int32)
+    input_ids = np.memmap(
+        f"data/input_ids_{data_type}.npy",
+        mode="w+",
+        shape=(batch_size, max_prompt_and_output_lens - 1),
+        dtype=np.int32,
+    )
     input_ids.fill(eos_token_id)
-    labels = np.memmap(f"data/labels_{data_type}.npy", mode='w+', shape=(batch_size, max_prompt_and_output_lens - 1), dtype=np.int32)
+    labels = np.memmap(
+        f"data/labels_{data_type}.npy",
+        mode="w+",
+        shape=(batch_size, max_prompt_and_output_lens - 1),
+        dtype=np.int32,
+    )
     labels.fill(eos_token_id)
-    response_mask = np.memmap(f"data/response_mask_{data_type}.npy", mode='w+', shape=(batch_size, max_prompt_and_output_lens - 1), dtype=bool)
+    response_mask = np.memmap(
+        f"data/response_mask_{data_type}.npy",
+        mode="w+",
+        shape=(batch_size, max_prompt_and_output_lens - 1),
+        dtype=bool,
+    )
     response_mask.fill(False)
 
     for idx, (prompt_tokens, output_tokens) in tqdm(
@@ -131,6 +164,7 @@ def tokenize_to_np(prompt_strs: list[str], output_strs: list[str], tokenizer: Pr
     del input_ids
     del labels
     del response_mask
+
 
 def tokenize_to_tensor(
     prompt_strs: list[str], output_strs: list[str], tokenizer: PreTrainedTokenizerBase
@@ -245,7 +279,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--type", type=str, default="train")
-    parser.add_argument("--to-np", action="store_true", help="Store tokenized data as numpy memmap files")
+    parser.add_argument(
+        "--to-np",
+        action="store_true",
+        help="Store tokenized data as numpy memmap files",
+    )
     args = parser.parse_args()
     tokenizer = AutoTokenizer.from_pretrained("./models/Qwen/Qwen2.5-Math-1.5B")
 
@@ -267,6 +305,7 @@ if __name__ == "__main__":
     labels = tokenized_data["labels"]
 
     from rich import print
+
     print(input_ids.shape)
     print(response_mask.shape)
     print(labels.shape)
