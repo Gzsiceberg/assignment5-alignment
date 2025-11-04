@@ -116,7 +116,7 @@ if __name__ == "__main__":
     train: datasets.Dataset = ds["train"] # type: ignore
     print(f"Total training samples: {len(train)}")
     if args.limit > 0:
-        train = train.select(range(args.limit) + args.offset)
+        train = train.select(range(args.offset, args.limit + args.offset))
 
     prompts, ground_truths = generate_prompt_and_gt(train)
     sampling_params = SamplingParams(

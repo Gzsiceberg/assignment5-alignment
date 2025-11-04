@@ -141,10 +141,10 @@ if __name__ == "__main__":
     if sft_config.eval_interval > 0:
         from datasets import load_dataset
         ds = load_dataset("hkust-nlp/dart-math-uniform")
-        test: datasets.Dataset = ds["train"] # type: ignore
-        test = test.select([i for i in list(range(len(test))) if i >= len(test) - 1024])
-        print(f"Total test samples: {len(test)}")
-        prompts, ground_truths = generate_prompt_and_gt(test)
+        train: datasets.Dataset = ds["train"] # type: ignore
+        train = train.select(range(1024, 1024 + 512))  # use a small subset for eval
+        print(f"Total test samples: {len(train)}")
+        prompts, ground_truths = generate_prompt_and_gt(train)
 
         init_vllm_model = init_vllm(
             model_id="models/Qwen/Qwen2.5-Math-1.5B",

@@ -292,7 +292,7 @@ if __name__ == "__main__":
     data_type: str = args.type
     ds: datasets.Dataset = data_math[data_type]  # type: ignore
     if args.limit > 0:
-        ds = ds.select(range(args.limit) + args.offset)
+        ds = ds.select(range(args.offset, args.limit + args.offset))
 
     prompts, responses = extract_prompt_and_response(ds)
 
