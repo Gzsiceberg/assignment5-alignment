@@ -89,19 +89,31 @@ def evaluate_vllm(
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
 
-def generate_prompt_and_gt(ds: datasets.Dataset) -> tuple[List[str], List[str]]:
-    from cs336_alignment.extract import extract_ans
+def generate_prompt_and_gt(ds: datasets.Dataset, limit: int, offset: int) -> tuple[List[str], List[str]]:
+    from rich import print
+    print(f"Generating prompts and ground truths with limit={limit} and offset={offset}")
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
     prompts: List[str] = []
     responses: List[str] = []
+    unique_queries: dict[str, int] = {}
     for t, data in tqdm(enumerate(ds)):
         question: str = data["query"] # type: ignore
+        q_key = question.lower().strip()
+        if q_key in unique_queries:
+            unique_queries[q_key] += 1
+            continue
+        else:
+            unique_queries[q_key] = 1
+            if len(unique_queries) <= offset:
+                continue
         answer_text: str = data["response"] # type: ignore
         full_prompt = prompt_templ.format(question)
         prompts.append(full_prompt)
         responses.append(answer_text)
+        if len(prompts) >= limit:
+            break
     return prompts, responses
 
 
@@ -121,17 +133,13 @@ if __name__ == "__main__":
 
     ds = load_dataset("hkust-nlp/dart-math-uniform")
     train: datasets.Dataset = ds["train"] # type: ignore
-    if args.limit > 0:
-        print(f"Selecting samples from {args.offset} to {args.offset + args.limit}")
-        train = train.select(range(args.offset, args.limit + args.offset))
-    print(f"Total training samples: {len(train)}")
     
     import torch
     gpu_count = torch.cuda.device_count()
     print(f"gpu count: {gpu_count}")
     assert gpu_count >= 1, "At least one GPU is required."
 
-    prompts, ground_truths = generate_prompt_and_gt(train)
+    prompts, ground_truths = generate_prompt_and_gt(train, args.limit, args.offset)
     sampling_params = SamplingParams(
         temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
     )
