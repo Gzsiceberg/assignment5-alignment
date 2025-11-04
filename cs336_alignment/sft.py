@@ -115,6 +115,7 @@ if __name__ == "__main__":
         attn_implementation="flash_attention_2",
         device_map=train_device,
     )
+    llm.train() # set model to training mode
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
 
     context_length = llm.config.max_position_embeddings
@@ -137,7 +138,7 @@ if __name__ == "__main__":
 
     from vllm.sampling_params import SamplingParams
     from math_baseline import generate_prompt_and_gt, evaluate_vllm
-    init_vllm_model = None
+    vllm_model = None
     prompts = []
     ground_truths = []
     sampling_params = SamplingParams(
@@ -154,16 +155,16 @@ if __name__ == "__main__":
         print(f"Total test samples: {len(train)}")
         prompts, ground_truths = generate_prompt_and_gt(train)
 
-        init_vllm_model = init_vllm(
+        vllm_model = init_vllm(
             model_id="models/Qwen/Qwen2.5-Math-1.5B",
             device="cuda:1",
             seed=seed,
             gpu_memory_utilization=0.85,
         )
-        load_policy_into_vllm_instance(llm, init_vllm_model)
+        load_policy_into_vllm_instance(llm, vllm_model)
 
         evaluate_vllm(
-            llm,
+            vllm_model,
             tokenizer,
             prompts,
             ground_truths,
@@ -187,6 +188,7 @@ if __name__ == "__main__":
         llm = torch.compile(llm)
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
+
     for st in pbar:
         random_index = np.random.randint(0, sample_count, size=batch_size)
         batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
@@ -211,11 +213,11 @@ if __name__ == "__main__":
         
         is_last_step = st == sft_config.num_steps - 1
         
-        if init_vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
+        if vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
             print_and_log(f"Running evaluation at epoch {st+1}...")
-            load_policy_into_vllm_instance(llm, init_vllm_model)
+            load_policy_into_vllm_instance(llm, vllm_model) # # type: ignore
             evaluate_vllm(
-                llm,
+                vllm_model,
                 tokenizer,
                 prompts,
                 ground_truths,
@@ -224,7 +226,7 @@ if __name__ == "__main__":
             )
 
     
-    llm.save_pretrained(save_directory=output_dir)
+    llm.save_pretrained(save_directory=output_dir) # type: ignore
     tokenizer.save_pretrained(save_directory=output_dir)
 
     end_time = time.time()
