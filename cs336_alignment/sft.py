@@ -110,7 +110,7 @@ if __name__ == "__main__":
     llm = AutoModelForCausalLM.from_pretrained(
         f"models/{sft_config.model_id}",
         torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
+        attn_implementation="auto",
         device_map=train_device,
     )
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
