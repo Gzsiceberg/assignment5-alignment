@@ -98,7 +98,7 @@ Assistant: <think>"""
     prompts: List[str] = []
     responses: List[str] = []
     unique_queries: dict[str, int] = {}
-    for t, data in tqdm(enumerate(ds)):
+    for t, data in tqdm(enumerate(ds), cleanup=True):
         question: str = data["query"] # type: ignore
         q_key = question.lower().strip()
         if q_key in unique_queries:
