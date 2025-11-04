@@ -247,17 +247,6 @@ if __name__ == "__main__":
         f"Training time for {training_steps} steps: {end_time - start_time} seconds."
     )
 
-
-    from cs336_alignment.sft_helper import log_generations
-    for _ in range(10):
-        log_generations(
-            llm,
-            tokenizer,
-            prompts,
-            ground_truths,
-        )
-
-
     logging.shutdown()
     import torch.distributed as dist
 
