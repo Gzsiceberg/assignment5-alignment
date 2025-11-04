@@ -37,6 +37,7 @@ no-build-isolation-package = ["flash-attn"]
 
 [tool.uv.sources]
 alpaca-eval = { git = "https://github.com/nelson-liu/alpaca_eval.git", rev = "forward_kwargs_to_vllm" }
+flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.8/flash_attn-2.7.4.post1%2Bcu124torch2.5-cp312-cp312-linux_x86_64.whl" }
 
 [tool.pytest.ini_options]
 log_cli = true
