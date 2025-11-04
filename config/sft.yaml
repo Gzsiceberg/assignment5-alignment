@@ -1,4 +1,4 @@
-num_epochs: 20
+num_epochs: 10
 learning_rate: 5e-5
 gradient_accumulation_steps: 16
 micro_batch_size: 4
