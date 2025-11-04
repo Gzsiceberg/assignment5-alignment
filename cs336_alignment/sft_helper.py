@@ -1,5 +1,7 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import PreTrainedTokenizerBase, PreTrainedModel
+from vllm import LLM
+from vllm.sampling_params import SamplingParams
 import torch
 from datasets import load_dataset
 import datasets
@@ -57,7 +59,8 @@ def sft_microbatch_train_step(
     loss = -masked_normalize(policy_log_probs, response_mask, normalize_constant)
     loss /= gradient_accumulation_steps
     loss /= batch_size
-    loss.backward()
+    with torch.autocast(device_type="cuda:0", enabled=False):
+        loss.backward()
     return loss, {}
 
 
@@ -204,10 +207,10 @@ def tokenize_to_tensor(
 
 
 def log_generations(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
+    vllm: LLM,
     prompts: list[str],
     ground_truths: list[str],
+    eval_sampling_params: SamplingParams,
 ):
     import random
     from rich import print
@@ -220,11 +223,12 @@ def log_generations(
     print(prompt)
 
     print("=== Response ===")
-    prompt_ids = tokenizer.encode(prompt)
-    model_input = torch.tensor([prompt_ids], dtype=torch.int, device=model.device)
-    assert model_input.ndim == 2 and model_input.shape[0] == 1
-    generated_ids = model.generate(model_input)
-    response = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+    # need generate logprobs in outputs
+    outputs = vllm.generate(
+        [prompt],
+        sampling_params=eval_sampling_params,
+    )
+    response = outputs[0].outputs[0].text
     print(response)
 
     print("=== Ground Truth ===")
@@ -243,12 +247,6 @@ def log_generations(
     print(
         f"Reward={reward}, FormatReward={format_reward}, AnswerRewardV2={answer_reward_v2}"
     )
-
-    print("=== Average Token Entropy ===")
-    logits = model(input_ids=model_input).logits
-    token_entropy = compute_entropy(logits)
-    avg_entropy = torch.sum(token_entropy) / token_entropy.numel()
-    print(f"Average Token Entropy: {avg_entropy.item()}")
 
     print("=== End of Log ===")
     resp_length = len(response)

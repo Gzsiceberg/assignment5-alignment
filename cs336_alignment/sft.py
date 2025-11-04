@@ -1,6 +1,7 @@
 import logging
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from vllm import LLM
+from vllm.sampling_params import SamplingParams
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel # type: ignore
 from unittest.mock import patch
 import torch
@@ -152,9 +153,9 @@ if __name__ == "__main__":
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True
 
-    from datasets import load_dataset
+    from datasets import load_dataset, Dataset
     ds = load_dataset("hkust-nlp/dart-math-uniform")
-    train = ds["train"] # type: ignore
+    train: Dataset = ds["train"] # type: ignore
     train = train.select(range(1024, 1024 + 512))  # use a small subset for eval
     print(f"Total test samples: {len(train)}")
     prompts, ground_truths = generate_prompt_and_gt(train)
@@ -180,7 +181,7 @@ if __name__ == "__main__":
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
     from tqdm import tqdm, trange
-    from transformers import get_scheduler
+    from transformers import get_scheduler # type: ignore
 
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
@@ -194,7 +195,7 @@ if __name__ == "__main__":
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
 
-    warmup_steps = int(0.01 * training_steps)
+    warmup_steps = int(0.02 * training_steps)
 
     lr_scheduler = get_scheduler(
         "cosine",
@@ -212,18 +213,19 @@ if __name__ == "__main__":
             assert batch_resp_mask.shape == (batch_size, sample_content_length)
             with amp_ctx:
                 results = get_response_log_probs(
-                    llm, batch_input_ids, batch_labels, return_token_entropy=True
+                    llm, batch_input_ids, batch_labels, return_token_entropy=True # type: ignore
                 )
                 log_probs = results["log_probs"]
                 token_entropy = results["token_entropy"]
-            loss, meta_data = sft_microbatch_train_step(
-                log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
-            )
+                loss, meta_data = sft_microbatch_train_step(
+                    log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
+                )
 
         optimizer.step()
         optimizer.zero_grad()
         lr_scheduler.step()
-        pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {lr_scheduler.get_last_lr()[0]:.6f}")
+        current_lr = lr_scheduler.get_last_lr()[0] 
+        pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {current_lr:.6f}") # type: ignore
         
         is_last_step = st == training_steps - 1
         if vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
