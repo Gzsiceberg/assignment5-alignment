@@ -207,6 +207,7 @@ if __name__ == "__main__":
     )
 
     eval_interval = sft_config.eval_interval * sample_count // batch_size if sft_config.eval_interval > 0 else 0
+    print_and_log(f"Evaluation interval (in steps): {eval_interval}")
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
         for _ in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
             random_index = np.random.randint(0, sample_count, size=batch_size)
