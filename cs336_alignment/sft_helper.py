@@ -278,6 +278,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=-1)
+    parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--type", type=str, default="train")
     parser.add_argument(
         "--to-np",
@@ -291,7 +292,7 @@ if __name__ == "__main__":
     data_type: str = args.type
     ds: datasets.Dataset = data_math[data_type]  # type: ignore
     if args.limit > 0:
-        ds = ds.select(range(args.limit))
+        ds = ds.select(range(args.limit) + args.offset)
 
     prompts, responses = extract_prompt_and_response(ds)
 
