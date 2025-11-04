@@ -31,6 +31,7 @@ def evaluate_vllm(
     prompts: List[str],
     ground_truths: List[str],
     eval_sampling_params: SamplingParams,
+    dump_data: bool = True,
 ) -> None:
     batch_size = 32
     num_batches = (len(prompts) + batch_size - 1) // batch_size
@@ -75,6 +76,9 @@ def evaluate_vllm(
     print(f"Average Reward over {total_entries} samples: {avg_reward}")
     print(f"Average Reward v2 over {total_entries} samples: {avg_reward_v2}")
     print(f"Average Formatting Reward over {total_entries} samples: {avg_formatting_reward}")
+
+    if not dump_data:
+        return
 
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)

@@ -127,6 +127,41 @@ if __name__ == "__main__":
     resp_mask = np.memmap(f"data/response_mask_train.npy", mode="r", dtype=bool)
     print_and_log(f"Training data has {input_ids.shape[0] / 1_000_000:.2f}M tokens.")
 
+    from vllm.sampling_params import SamplingParams
+    from math_baseline import generate_prompt_and_gt, evaluate_vllm
+    init_vllm_model = None
+    prompts = []
+    ground_truths = []
+    sampling_params = SamplingParams(
+        temperature=1.0, top_p=1.0, max_tokens=context_length, stop=["\n"]
+    )
+    sampling_params.stop = ["</answer>"]
+    sampling_params.include_stop_str_in_output = True
+
+    if sft_config.eval_interval > 0:
+        from datasets import load_dataset
+        ds = load_dataset("hkust-nlp/dart-math-uniform")
+        test: datasets.Dataset = ds["test"] # type: ignore
+        print(f"Total test samples: {len(test)}")
+        prompts, ground_truths = generate_prompt_and_gt(test)
+
+        init_vllm_model = init_vllm(
+            model_id="models/Qwen/Qwen2.5-Math-1.5B",
+            device="cuda:1",
+            seed=seed,
+            gpu_memory_utilization=0.85,
+        )
+        load_policy_into_vllm_instance(llm, init_vllm_model)
+
+        evaluate_vllm(
+            llm,
+            tokenizer,
+            prompts,
+            ground_truths,
+            sampling_params,
+            dump_data=False
+        )
+
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
     from tqdm import tqdm, trange
@@ -158,6 +193,21 @@ if __name__ == "__main__":
             optimizer.step()
             optimizer.zero_grad()
             pbar.set_description(f"SFT Epoch {epoch+1} | Loss: {loss.item():.4f}")
+        
+        is_last_step = epoch == sft_config.num_epochs - 1
+        
+        if init_vllm_model and sft_config.eval_interval > 0 and ((epoch + 1) % sft_config.eval_interval == 0 or is_last_step):
+            print_and_log(f"Running evaluation at epoch {epoch+1}...")
+            load_policy_into_vllm_instance(llm, init_vllm_model)
+            evaluate_vllm(
+                llm,
+                tokenizer,
+                prompts,
+                ground_truths,
+                sampling_params,
+                dump_data=False
+            )
+
     
     llm.save_pretrained(save_directory=output_dir)
     tokenizer.save_pretrained(save_directory=output_dir)
@@ -170,3 +220,12 @@ if __name__ == "__main__":
     del input_ids
     del labels
     del resp_mask
+
+
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        try:
+            dist.destroy_process_group()
+        except Exception:
+            pass
