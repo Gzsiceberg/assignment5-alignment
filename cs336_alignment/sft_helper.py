@@ -290,7 +290,7 @@ Assistant: <think>"""
     max_occurrence = list_occurrences.max()
     min_occurrence = list_occurrences.min()
     std_occurrence = list_occurrences.std()
-    print(f"Mean occurrence: {mean_occurrence}, Max occurrence: {max_occurrence}, Min occurrence: {min_occurrence}, Std occurrence: {std_occurrence}")
+    print(f"Mean occurrence: {mean_occurrence:.2f}, Max occurrence: {max_occurrence}, Min occurrence: {min_occurrence}, Std occurrence: {std_occurrence:.2f}")
     return prompts, responses
 
 
