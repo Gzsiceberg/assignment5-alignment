@@ -136,6 +136,11 @@ if __name__ == "__main__":
     assert input_ids.shape == labels.shape == resp_mask.shape
     assert input_ids.shape[1] <= context_length, f"Input sequence length exceeds context length."
 
+    example_count = input_ids.shape[0]
+    batch_size = sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
+    training_steps = sft_config.num_epochs * example_count // batch_size
+    print(f"Total training steps: {training_steps} batch size: {batch_size} example count: {example_count}")
+
     from vllm.sampling_params import SamplingParams
     from math_baseline import generate_prompt_and_gt, evaluate_vllm
     vllm_model = None
@@ -179,9 +184,9 @@ if __name__ == "__main__":
 
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
-    batch_size = sft_config.batch_size
+    batch_size = sft_config.micro_batch_size
     start_time = time.time()
-    pbar = trange(sft_config.num_steps, desc="SFT Training Steps")
+    pbar = trange(training_steps, desc="SFT Training Steps")
     amp_ctx = torch.autocast(device_type=train_device, dtype=torch.bfloat16)
     if sft_config.compile_model:
         print_and_log("Compiling model...")
@@ -189,13 +194,13 @@ if __name__ == "__main__":
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
 
-    warmup_steps = int(0.01 * sft_config.num_steps)
+    warmup_steps = int(0.01 * training_steps)
 
     lr_scheduler = get_scheduler(
         "cosine",
         optimizer=optimizer,
         num_warmup_steps=warmup_steps,
-        num_training_steps=sft_config.num_steps,
+        num_training_steps=training_steps
     )
 
     for st in pbar:
@@ -221,7 +226,7 @@ if __name__ == "__main__":
             lr_scheduler.step()
             pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {lr_scheduler.get_last_lr()[0]:.6f}")
         
-        is_last_step = st == sft_config.num_steps - 1
+        is_last_step = st == training_steps - 1
         
         if vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
             print_and_log(f"Running evaluation at step {st+1}...")
@@ -241,7 +246,7 @@ if __name__ == "__main__":
 
     end_time = time.time()
     print_and_log(
-        f"Training time for {sft_config.num_steps} steps: {end_time - start_time} seconds."
+        f"Training time for {training_steps} steps: {end_time - start_time} seconds."
     )
     logging.shutdown()
     import torch.distributed as dist
