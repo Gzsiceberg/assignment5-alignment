@@ -181,7 +181,7 @@ if __name__ == "__main__":
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
     from tqdm import tqdm, trange
-    from transformers import get_scheduler # type: ignore
+    from transformers import get_cosine_schedule_with_warmup
 
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
@@ -196,11 +196,10 @@ if __name__ == "__main__":
 
     warmup_steps = int(0.02 * training_steps)
 
-    lr_scheduler = get_scheduler(
-        "cosine",
-        optimizer=optimizer,
-        num_warmup_steps=warmup_steps,
-        num_training_steps=training_steps
+    lr_scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        warmup_steps,
+        training_steps
     )
 
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
