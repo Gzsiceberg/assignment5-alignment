@@ -202,6 +202,7 @@ if __name__ == "__main__":
         training_steps
     )
 
+    eval_interval = sft_config.eval_interval * sample_count // batch_size if sft_config.eval_interval > 0 else 0
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
         for _ in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
             random_index = np.random.randint(0, sample_count, size=batch_size)
@@ -226,7 +227,7 @@ if __name__ == "__main__":
         pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {current_lr:.6f}") # type: ignore
         
         is_last_step = st == training_steps - 1
-        if vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
+        if vllm_model and eval_interval > 0 and ((st + 1) % eval_interval == 0 or is_last_step):
             print_and_log(f"Running evaluation at step {st+1}...")
             load_policy_into_vllm_instance(llm, vllm_model) # # type: ignore
             evaluate_vllm(

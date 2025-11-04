@@ -4,3 +4,4 @@ gradient_accumulation_steps: 16
 micro_batch_size: 4
 max_examples: 512
 compile_model: True
+eval_interval: 1
