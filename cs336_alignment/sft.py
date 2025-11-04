@@ -91,7 +91,9 @@ def eval_loss(
     from cs336_alignment.sft_helper import get_response_log_probs, sft_microbatch_eval_step
     with torch.no_grad():
         total_loss = torch.tensor(0.0, device=train_device)
-        for _ in range(512):
+        eval_epochs = 128
+        tr = trange(eval_epochs, desc="Eval Loss Batches")
+        for it in tr:
             batch_input_ids, batch_labels, batch_resp_mask = get_batch(
                 input_ids, labels, resp_mask, batch_size, context_length, sft_config.limit, base=4096
             )
@@ -104,7 +106,7 @@ def eval_loss(
             log_probs = results["log_probs"]
             loss = sft_microbatch_eval_step(log_probs, batch_resp_mask, normalize_constant=1.0)
             total_loss += loss
-    return total_loss.item()
+    return total_loss.item() / eval_epochs
 
 
 if __name__ == "__main__":
