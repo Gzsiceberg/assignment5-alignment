@@ -158,13 +158,13 @@ if __name__ == "__main__":
 
     from datasets import load_dataset, Dataset
     from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
-    ds = load_dataset("hkust-nlp/dart-math-uniform")
-    train: Dataset = ds["train"] # type: ignore
-    train = train.select(range(1024, 1024 + 512))  # use a small subset for eval
-    print(f"Total test samples: {len(train)}")
-    prompts, ground_truths = generate_prompt_and_gt(train)
 
     if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
+        ds = load_dataset("hkust-nlp/dart-math-uniform")
+        train: Dataset = ds["train"] # type: ignore
+        print(f"Total test samples: {len(train)}")
+        prompts, ground_truths = generate_prompt_and_gt(train, 512, 1024)
+
         print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(
             model_id="models/Qwen/Qwen2.5-Math-1.5B",
