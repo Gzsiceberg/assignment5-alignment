@@ -138,7 +138,7 @@ if __name__ == "__main__":
 
     example_count = input_ids.shape[0]
     batch_size = sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
-    training_steps = sft_config.num_epochs * example_count // batch_size
+    training_steps = sft_config.num_epochs * example_count // sft_config.micro_batch_size
     print(f"Total training steps: {training_steps} batch size: {batch_size} example count: {example_count}")
 
     from vllm.sampling_params import SamplingParams
