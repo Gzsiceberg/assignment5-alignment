@@ -187,7 +187,6 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
     batch_size = sft_config.micro_batch_size
     start_time = time.time()
-    pbar = trange(training_steps, desc="SFT Training Steps")
     amp_ctx = torch.autocast(device_type=train_device, dtype=torch.bfloat16)
     if sft_config.compile_model:
         print_and_log("Compiling model...")
@@ -204,8 +203,8 @@ if __name__ == "__main__":
         num_training_steps=training_steps
     )
 
-    for st in pbar:
-        for _ in range(gradient_accumulation_steps):
+    for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
+        for _ in tqdm(range(gradient_accumulation_steps), desc="Gradient Accumulation Steps"):
             random_index = np.random.randint(0, sample_count, size=batch_size)
             batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
             assert batch_input_ids.shape == (batch_size, sample_content_length)
