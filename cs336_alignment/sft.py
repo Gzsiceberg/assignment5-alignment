@@ -204,7 +204,7 @@ if __name__ == "__main__":
     )
 
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
-        for _ in tqdm(range(gradient_accumulation_steps), desc="Gradient Accumulation Steps"):
+        for _ in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
             random_index = np.random.randint(0, sample_count, size=batch_size)
             batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
             assert batch_input_ids.shape == (batch_size, sample_content_length)
