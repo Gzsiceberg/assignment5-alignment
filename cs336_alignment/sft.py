@@ -108,12 +108,12 @@ if __name__ == "__main__":
 
     train_device = "cuda:0"
     llm = AutoModelForCausalLM.from_pretrained(
-        "models/Qwen/Qwen2.5-Math-1.5B",
+        f"models/{sft_config.model_id}",
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map=train_device,
     )
-    tokenizer = AutoTokenizer.from_pretrained("models/Qwen/Qwen2.5-Math-1.5B")
+    tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
 
     context_length = llm.config.max_position_embeddings
     print_and_log(f"Model context length: {context_length}")

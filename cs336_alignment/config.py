@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 
 class SftConfig(BaseModel):
+    model_id: str = "Qwen/Qwen2.5-Math-1.5B"
     learning_rate: float = 1e-5
     batch_size: int = 128
     gradient_accumulation_steps: int = 8
