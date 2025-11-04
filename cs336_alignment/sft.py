@@ -59,6 +59,27 @@ def get_batch(
 
 
 if __name__ == "__main__":
+    import argparse
+    import numpy as np
+    import random
+    from config import load_config_from_file, SftConfig
+    import datasets
+    from datasets import load_dataset
+    from sft_helper import extract_prompt_and_response, tokenize_to_tensor
+    import os
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument('-c', '--config', type=str, required=False, help='Path to config file')
+    args = parser.parse_args()
+    config = load_config_from_file(args.config) 
+    sft_config = SftConfig(**config)
+
+    seed = args.seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     train_device = "cuda:0"
     llm = AutoModelForCausalLM.from_pretrained(
         "models/Qwen/Qwen2.5-Math-1.5B",
@@ -67,11 +88,6 @@ if __name__ == "__main__":
         default_device=train_device,
     )
     tokenizer = AutoTokenizer.from_pretrained("models/Qwen/Qwen2.5-Math-1.5B")
-
-    import datasets
-    from datasets import load_dataset
-    from sft_helper import extract_prompt_and_response, tokenize_to_tensor
-    import os
 
     ds = load_dataset("hkust-nlp/dart-math-uniform")
     train: datasets.Dataset = ds["train"]  # type: ignore
@@ -85,17 +101,11 @@ if __name__ == "__main__":
     labels = tokenized_data["labels"].to(train_device)
     resp_mask = tokenized_data["response_mask"].to(train_device)
 
-    import numpy as np
-
-    batch_size = 128
-    sample_count = input_ids.shape[0]
-    index = np.random.randint(0, sample_count, size=batch_size)
-
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
-
-    gradient_accumulation_steps = 8
-    optimizer = torch.optim.AdamW(llm.parameters(), lr=1e-5)
-    for it in range(1000):
+    gradient_accumulation_steps = sft_config.gradient_accumulation_steps
+    optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
+    batch_size = sft_config.batch_size
+    for epoch in range(sft_config.num_epochs):
         batch_input_ids, batch_labels, batch_resp_mask = get_batch(
             input_ids, labels, resp_mask, batch_size
         )
@@ -108,6 +118,6 @@ if __name__ == "__main__":
             log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
         )
 
-        if (it + 1) % gradient_accumulation_steps == 0:
+        if (epoch + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
