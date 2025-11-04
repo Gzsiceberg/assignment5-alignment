@@ -115,6 +115,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--offset", type=int, default=1024, help="Offset for selecting samples."
     )
+    parser.add_argument("-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID to evaluate.")
     args = parser.parse_args()
     os.makedirs("data", exist_ok=True)
 
@@ -135,7 +136,7 @@ if __name__ == "__main__":
     )
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True
-    model = LLM(model="models/Qwen/Qwen2.5-Math-1.5B")
+    model = LLM(model=f"models/{args.model_id}")
 
     evaluate_vllm(
         vllm_model=model,
