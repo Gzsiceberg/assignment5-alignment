@@ -292,7 +292,9 @@ if __name__ == "__main__":
     data_type: str = args.type
     ds: datasets.Dataset = data_math[data_type]  # type: ignore
     if args.limit > 0:
+        print(f"Selecting samples from {args.offset} to {args.offset + args.limit}")
         ds = ds.select(range(args.offset, args.limit + args.offset))
+    print(f"Total {data_type} samples: {len(ds)}")
 
     prompts, responses = extract_prompt_and_response(ds)
 
