@@ -623,7 +623,7 @@ def is_latex_equal(given_answer: str, ground_truth: str) -> bool:
                     given_answer = f"${given_answer}$"
                 if "$" not in ground_truth:
                     ground_truth = f"${ground_truth}$"
-                gold = parse( ground_truth,
+                gold = parse(given_answer,
                         extraction_config=(
                             LatexExtractionConfig(boxed_match_priority=0),
                             ExprExtractionConfig(),
