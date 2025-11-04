@@ -254,21 +254,34 @@ def log_generations(
     print(f"Response Length: {resp_length}, Ground Truth Length: {gt_length}")
 
 
-def extract_prompt_and_response(ds: datasets.Dataset) -> tuple[list[str], list[str]]:
+def extract_prompt_and_response(ds: datasets.Dataset, limit: int, offset: int) -> tuple[list[str], list[str]]:
     from cs336_alignment.extract import extract_ans
+    print(f"Extracting up to {limit} unique prompts with offset {offset}")
 
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
     prompts: list[str] = []
     responses: list[str] = []
+    unique_queries: dict[str, int] = {}
     for data in tqdm(ds, total=len(ds), desc="Extracting prompts and responses"):
         question: str = data["query"]  # type: ignore
+        q_key = question.lower().strip()
+        if q_key in unique_queries:
+            unique_queries[q_key] += 1
+            continue
+        else:
+            unique_queries[q_key] = 1
+            if len(unique_queries) <= offset:
+                continue
         resp: str = data["response"]  # type: ignore
         answer = extract_ans(resp, False)
         assert answer is not None, f"Failed to extract answer from response: {resp}"
         prompts.append(prompt_templ.format(question))
         responses.append(f"{resp} </think> <answer> {answer} </answer>")
+        if len(prompts) >= limit:
+            break
+    print(f"Total unique prompts: {len(prompts)} maximum occurrence: {max(unique_queries.values())} min occurrence: {min(unique_queries.values())}")
     return prompts, responses
 
 
@@ -290,12 +303,7 @@ if __name__ == "__main__":
     data_math = load_dataset("hkust-nlp/dart-math-uniform")
     data_type: str = args.type
     ds: datasets.Dataset = data_math[data_type]  # type: ignore
-    if args.limit > 0:
-        print(f"Selecting samples from {args.offset} to {args.offset + args.limit}")
-        ds = ds.select(range(args.offset, args.limit + args.offset))
-    print(f"Total {data_type} samples: {len(ds)}")
-
-    prompts, responses = extract_prompt_and_response(ds)
+    prompts, responses = extract_prompt_and_response(ds, args.limit, args.offset)
 
     if args.to_np:
         tokenize_to_np(prompts, responses, tokenizer, data_type)
