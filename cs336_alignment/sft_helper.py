@@ -310,3 +310,8 @@ if __name__ == "__main__":
     print(input_ids.shape)
     print(response_mask.shape)
     print(labels.shape)
+
+    import numpy as np
+    np.save("data/input_ids_tensor.npy", input_ids.numpy())
+    np.save("data/response_mask_tensor.npy", response_mask.numpy())
+    np.save("data/labels_tensor.npy", labels.numpy())

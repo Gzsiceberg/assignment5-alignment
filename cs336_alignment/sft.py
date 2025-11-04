@@ -122,10 +122,12 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     print_and_log("-" * 120)
-    input_ids = np.memmap(f"data/input_ids_train.npy", mode="r", dtype=np.int32)
-    labels = np.memmap(f"data/labels_train.npy", mode="r", dtype=np.int32)
-    resp_mask = np.memmap(f"data/response_mask_train.npy", mode="r", dtype=bool)
-    print_and_log(f"Training data has {input_ids.shape[0] / 1_000_000:.2f}M tokens.")
+    input_ids = torch.from_numpy(np.load(f"data/input_ids_tensor.npy", mmap_mode="r")).to(train_device)
+    labels = torch.from_numpy(np.load(f"data/labels_tensor.npy", mmap_mode="r")).to(train_device)
+    resp_mask = torch.from_numpy(np.load(f"data/response_mask_tensor.npy", mmap_mode="r")).to(train_device)
+    print_and_log(f"Input IDs shape: {input_ids.shape}")
+    assert input_ids.shape == labels.shape == resp_mask.shape
+    assert input_ids.shape[1] <= context_length, f"Input sequence length exceeds context length."
 
     from vllm.sampling_params import SamplingParams
     from math_baseline import generate_prompt_and_gt, evaluate_vllm
@@ -173,11 +175,14 @@ if __name__ == "__main__":
     start_time = time.time()
     pbar = trange(sft_config.num_epochs, desc="SFT Epoch")
     amp_ctx = torch.autocast(device_type=train_device, dtype=torch.bfloat16)
+    sample_count = input_ids.shape[0]
+    sample_content_length = input_ids.shape[1]
     for epoch in pbar:
-        batch_input_ids, batch_labels, batch_resp_mask = get_batch(input_ids, labels, resp_mask, batch_size, context_length)
-        batch_input_ids = batch_input_ids.to(train_device)
-        batch_labels = batch_labels.to(train_device)
-        batch_resp_mask = batch_resp_mask.to(train_device)
+        random_index = np.random.randint(0, sample_count, size=batch_size)
+        batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
+        assert batch_input_ids.shape == (batch_size, sample_content_length)
+        assert batch_labels.shape == (batch_size, sample_content_length)
+        assert batch_resp_mask.shape == (batch_size, sample_content_length)
 
         with amp_ctx:
             results = get_response_log_probs(
