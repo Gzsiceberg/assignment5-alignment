@@ -277,7 +277,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=-1)
+    parser.add_argument("--limit", type=int, default=1024)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--type", type=str, default="train")
     parser.add_argument(
