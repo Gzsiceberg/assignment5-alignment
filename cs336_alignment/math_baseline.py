@@ -117,6 +117,11 @@ if __name__ == "__main__":
     print(f"Total training samples: {len(train)}")
     if args.limit > 0:
         train = train.select(range(args.offset, args.limit + args.offset))
+    
+    import torch
+    gpu_count = torch.cuda.device_count()
+    print(f"gpu count: {gpu_count}")
+    assert gpu_count >= 1, "At least one GPU is required."
 
     prompts, ground_truths = generate_prompt_and_gt(train)
     sampling_params = SamplingParams(
