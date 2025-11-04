@@ -161,12 +161,14 @@ if __name__ == "__main__":
     prompts, ground_truths = generate_prompt_and_gt(train)
 
     if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
+        print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(
             model_id="models/Qwen/Qwen2.5-Math-1.5B",
             device="cuda:1",
             seed=seed,
             gpu_memory_utilization=0.85,
         )
+        print_and_log("Loading policy weights into vLLM model...")
         load_policy_into_vllm_instance(llm, vllm_model)
 
         evaluate_vllm(
