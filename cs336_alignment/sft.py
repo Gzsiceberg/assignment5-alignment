@@ -1,8 +1,10 @@
+import logging
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from vllm import LLM
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 from unittest.mock import patch
 import torch
+import numpy as np
 
 
 def init_vllm(
@@ -43,37 +45,46 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
 
 
 def get_batch(
-    input_ids: torch.Tensor,
-    labels: torch.Tensor,
-    resp_mask: torch.Tensor,
+    input_ids: np.ndarray,
+    labels: np.ndarray,
+    resp_mask: np.ndarray,
     batch_size: int,
-):
-    import numpy as np
-
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     sample_count = input_ids.shape[0]
     indices = np.random.randint(0, sample_count, size=batch_size)
     batch_input_ids = input_ids[indices]
     batch_labels = labels[indices]
     batch_resp_mask = resp_mask[indices]
-    return batch_input_ids, batch_labels, batch_resp_mask
+    return (
+        torch.from_numpy(batch_input_ids),
+        torch.from_numpy(batch_labels),
+        torch.from_numpy(batch_resp_mask),
+    )
 
 
 if __name__ == "__main__":
+    import os
     import argparse
     import numpy as np
     import random
-    from config import load_config_from_file, SftConfig
+    from cs336_alignment.config import load_config_from_file, SftConfig
     import datasets
     from datasets import load_dataset
-    from sft_helper import extract_prompt_and_response, tokenize_to_tensor
-    import os
+    from cs336_alignment.logger import setup_logging, print_and_log
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument('-c', '--config', type=str, required=False, help='Path to config file')
+    parser.add_argument(
+        "-c", "--config", type=str, required=False, help="Path to config file"
+    )
     args = parser.parse_args()
-    config = load_config_from_file(args.config) 
+    config = load_config_from_file(args.config)
+    config_name = os.path.splitext(os.path.basename(args.config))[0]
+    setup_logging(log_file_name=f"{config_name}.log")
+    print_and_log("Starting SFT training...")
+    print_and_log(f"Arguments: {args}")
     sft_config = SftConfig(**config)
+    print_and_log(f"SFT Config: {sft_config}")
 
     seed = args.seed
     torch.manual_seed(seed)
@@ -95,16 +106,25 @@ if __name__ == "__main__":
     output_dir = "models/sft"
     os.makedirs(output_dir, exist_ok=True)
 
-    prompts, responses = extract_prompt_and_response(train)
-    tokenized_data = tokenize_to_tensor(prompts, responses, tokenizer)
-    input_ids = tokenized_data["input_ids"].to(train_device)
-    labels = tokenized_data["labels"].to(train_device)
-    resp_mask = tokenized_data["response_mask"].to(train_device)
+    # prompts, responses = extract_prompt_and_response(train)
+    # tokenized_data = tokenize_to_tensor(prompts, responses, tokenizer)
+    # input_ids = tokenized_data["input_ids"].to(train_device)
+    # labels = tokenized_data["labels"].to(train_device)
+    # resp_mask = tokenized_data["response_mask"].to(train_device)
+
+    print_and_log("-" * 120)
+    input_ids = np.memmap(f"data/input_ids_train.npy", mode="r", dtype=np.int32)
+    labels = np.memmap(f"data/labels_train.npy", mode="r", dtype=np.int32)
+    resp_mask = np.memmap(f"data/response_mask_train.npy", mode="r", dtype=bool)
+    print_and_log(f"Training data has {input_ids.shape[0]} tokens.")
 
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
+    import time
+
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
     batch_size = sft_config.batch_size
+    start_time = time.time()
     for epoch in range(sft_config.num_epochs):
         batch_input_ids, batch_labels, batch_resp_mask = get_batch(
             input_ids, labels, resp_mask, batch_size
@@ -121,3 +141,12 @@ if __name__ == "__main__":
         if (epoch + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
+
+    end_time = time.time()
+    print_and_log(
+        f"Training time for {sft_config.num_epochs} epochs: {end_time - start_time} seconds."
+    )
+    logging.shutdown()
+    del input_ids
+    del labels
+    del resp_mask

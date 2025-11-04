@@ -4,11 +4,13 @@ import yaml
 import typing
 from pydantic import BaseModel
 
+
 class SftConfig(BaseModel):
     learning_rate: float = 1e-5
     batch_size: int = 128
     gradient_accumulation_steps: int = 8
     num_epochs: int = 10
+
 
 def load_config_from_file(config_path: str) -> dict:
     """Load configuration from a file and return as a dictionary"""
