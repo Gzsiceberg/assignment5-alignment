@@ -175,6 +175,7 @@ if __name__ == "__main__":
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
     from tqdm import tqdm, trange
+    from transformers import get_scheduler
 
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
@@ -187,6 +188,15 @@ if __name__ == "__main__":
         llm = torch.compile(llm)
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
+
+    warmup_steps = int(0.01 * sft_config.num_steps)
+
+    lr_scheduler = get_scheduler(
+        "cosine",
+        optimizer=optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=sft_config.num_steps,
+    )
 
     for st in pbar:
         random_index = np.random.randint(0, sample_count, size=batch_size)
@@ -208,7 +218,8 @@ if __name__ == "__main__":
         if (st + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
-            pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f}")
+            lr_scheduler.step()
+            pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {lr_scheduler.get_last_lr()[0]:.6f}")
         
         is_last_step = st == sft_config.num_steps - 1
         
