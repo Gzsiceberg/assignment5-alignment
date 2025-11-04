@@ -103,6 +103,8 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision("high")
 
     # warning: flash-attn currently only supports certain CUDA and PyTorch versions.
     # uv add flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.4.11/flash_attn-2.8.3%2Bcu128torch2.5-cp312-cp312-linux_x86_64.whl" }
@@ -122,9 +124,9 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     print_and_log("-" * 120)
-    input_ids = np.load(f"data/input_ids_tensor.npy")
-    labels = np.load(f"data/labels_tensor.npy")
-    resp_mask = np.load(f"data/response_mask_tensor.npy")
+    input_ids = np.load(f"data/input_ids_tensor.npy")[: sft_config.max_examples]
+    labels = np.load(f"data/labels_tensor.npy")[: sft_config.max_examples]
+    resp_mask = np.load(f"data/response_mask_tensor.npy")[: sft_config.max_examples]
 
     input_ids = torch.from_numpy(input_ids).to(train_device)
     resp_mask = torch.from_numpy(resp_mask).to(train_device)
@@ -172,16 +174,20 @@ if __name__ == "__main__":
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
     from tqdm import tqdm, trange
+    from transformers import lr_scheduler # type: ignore
 
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
     batch_size = sft_config.batch_size
     start_time = time.time()
-    pbar = trange(sft_config.num_epochs, desc="SFT Epoch")
+    pbar = trange(sft_config.num_steps, desc="SFT Epoch")
     amp_ctx = torch.autocast(device_type=train_device, dtype=torch.bfloat16)
+    if sft_config.compile_model:
+        print_and_log("Compiling model...")
+        llm = torch.compile(llm)
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
-    for epoch in pbar:
+    for st in pbar:
         random_index = np.random.randint(0, sample_count, size=batch_size)
         batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
         assert batch_input_ids.shape == (batch_size, sample_content_length)
@@ -198,15 +204,15 @@ if __name__ == "__main__":
             log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
         )
 
-        if (epoch + 1) % gradient_accumulation_steps == 0:
+        if (st + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
             pbar.set_description(f"Loss: {loss.item():.4f}")
         
-        is_last_step = epoch == sft_config.num_epochs - 1
+        is_last_step = st == sft_config.num_steps - 1
         
-        if init_vllm_model and sft_config.eval_interval > 0 and ((epoch + 1) % sft_config.eval_interval == 0 or is_last_step):
-            print_and_log(f"Running evaluation at epoch {epoch+1}...")
+        if init_vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
+            print_and_log(f"Running evaluation at epoch {st+1}...")
             load_policy_into_vllm_instance(llm, init_vllm_model)
             evaluate_vllm(
                 llm,
@@ -223,7 +229,7 @@ if __name__ == "__main__":
 
     end_time = time.time()
     print_and_log(
-        f"Training time for {sft_config.num_epochs} epochs: {end_time - start_time} seconds."
+        f"Training time for {sft_config.num_steps} epochs: {end_time - start_time} seconds."
     )
     logging.shutdown()
     import torch.distributed as dist
