@@ -220,8 +220,8 @@ if __name__ == "__main__":
                 )
 
         optimizer.step()
-        optimizer.zero_grad()
         lr_scheduler.step()
+        optimizer.zero_grad()
         current_lr = lr_scheduler.get_last_lr()[0] 
         pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {current_lr:.6f}") # type: ignore
         
