@@ -104,10 +104,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--limit", type=int, default=-1, help="Number of samples to evaluate on."
+        "--limit", type=int, default=512, help="Number of samples to evaluate on."
     )
     parser.add_argument(
-        "--offset", type=int, default=0, help="Offset for selecting samples."
+        "--offset", type=int, default=1024, help="Offset for selecting samples."
     )
     args = parser.parse_args()
     os.makedirs("data", exist_ok=True)
