@@ -155,6 +155,7 @@ if __name__ == "__main__":
     sampling_params.include_stop_str_in_output = True
 
     from datasets import load_dataset, Dataset
+    from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
     ds = load_dataset("hkust-nlp/dart-math-uniform")
     train: Dataset = ds["train"] # type: ignore
     train = train.select(range(1024, 1024 + 512))  # use a small subset for eval
@@ -173,11 +174,11 @@ if __name__ == "__main__":
         load_policy_into_vllm_instance(llm, vllm_model)
 
         evaluate_vllm(
-            vllm_model,
-            tokenizer,
-            prompts,
-            ground_truths,
-            sampling_params,
+            vllm_model=vllm_model,
+            reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
+            prompts=prompts,
+            ground_truths=ground_truths,
+            eval_sampling_params=sampling_params,
             dump_data=False
         )
 
@@ -234,11 +235,11 @@ if __name__ == "__main__":
             print_and_log(f"Running evaluation at step {st+1}...")
             load_policy_into_vllm_instance(llm, vllm_model) # # type: ignore
             evaluate_vllm(
-                vllm_model,
-                tokenizer,
-                prompts,
-                ground_truths,
-                sampling_params,
+                vllm_model=vllm_model,
+                reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
+                prompts=prompts,
+                ground_truths=ground_truths,
+                eval_sampling_params=sampling_params,
                 dump_data=False
             )
 
