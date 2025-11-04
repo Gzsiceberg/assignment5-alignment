@@ -154,7 +154,7 @@ if __name__ == "__main__":
 
     from datasets import load_dataset
     ds = load_dataset("hkust-nlp/dart-math-uniform")
-    train: datasets.Dataset = ds["train"] # type: ignore
+    train = ds["train"] # type: ignore
     train = train.select(range(1024, 1024 + 512))  # use a small subset for eval
     print(f"Total test samples: {len(train)}")
     prompts, ground_truths = generate_prompt_and_gt(train)
