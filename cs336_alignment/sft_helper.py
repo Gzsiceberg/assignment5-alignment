@@ -25,7 +25,6 @@ def get_response_log_probs(
     labels: Int[torch.Tensor, "batch seq_len"],
     return_token_entropy: bool = False,
 ) -> dict[str, torch.Tensor]:
-    batch_size, seq_len = input_ids.shape
     logits = model(input_ids=input_ids).logits
     gathered = logits.gather(dim=-1, index=labels.long().unsqueeze(-1)).squeeze(-1)
     row_logsumexp = torch.logsumexp(logits, dim=-1)
@@ -54,8 +53,8 @@ def sft_microbatch_train_step(
     loss = -masked_normalize(policy_log_probs, response_mask, normalize_constant)
     loss /= gradient_accumulation_steps
     loss /= batch_size
-    with torch.autocast(device_type="cuda:0", enabled=False):
-        loss.backward()
+    # with torch.autocast(device_type="cuda:0", enabled=False):
+    loss.backward()
     return loss, {}
 
 

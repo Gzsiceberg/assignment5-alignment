@@ -227,10 +227,11 @@ if __name__ == "__main__":
                 total_loss += loss.detach()
 
         total_loss = total_loss / gradient_accumulation_steps
+        current_lr = lr_scheduler.get_last_lr()[0]
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
-        current_lr = lr_scheduler.get_last_lr()[0] 
+        print(f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f}")
         pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}") # type: ignore
 
         is_last_step = st == training_steps - 1
