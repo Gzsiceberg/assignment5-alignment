@@ -122,9 +122,13 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     print_and_log("-" * 120)
-    input_ids = torch.from_numpy(np.load(f"data/input_ids_tensor.npy", mmap_mode="r")).to(train_device)
-    labels = torch.from_numpy(np.load(f"data/labels_tensor.npy", mmap_mode="r")).to(train_device)
-    resp_mask = torch.from_numpy(np.load(f"data/response_mask_tensor.npy", mmap_mode="r")).to(train_device)
+    input_ids = np.load(f"data/input_ids_tensor.npy")
+    labels = np.load(f"data/labels_tensor.npy")
+    resp_mask = np.load(f"data/response_mask_tensor.npy")
+
+    input_ids = torch.from_numpy(input_ids).to(train_device)
+    resp_mask = torch.from_numpy(resp_mask).to(train_device)
+    labels = torch.from_numpy(labels).to(train_device)
     print_and_log(f"Input IDs shape: {input_ids.shape}")
     assert input_ids.shape == labels.shape == resp_mask.shape
     assert input_ids.shape[1] <= context_length, f"Input sequence length exceeds context length."
@@ -222,11 +226,6 @@ if __name__ == "__main__":
         f"Training time for {sft_config.num_epochs} epochs: {end_time - start_time} seconds."
     )
     logging.shutdown()
-    del input_ids
-    del labels
-    del resp_mask
-
-
     import torch.distributed as dist
 
     if dist.is_available() and dist.is_initialized():
