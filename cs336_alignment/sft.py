@@ -136,8 +136,8 @@ if __name__ == "__main__":
     batch_size = sft_config.batch_size
     start_time = time.time()
 
-    tr = trange(sft_config.num_epochs, desc="SFT Epoch")
-    for epoch in tr:
+    pbar = trange(sft_config.num_epochs, desc="SFT Epoch")
+    for epoch in pbar:
         batch_input_ids, batch_labels, batch_resp_mask = get_batch(
             input_ids, labels, resp_mask, batch_size, context_length, sft_config.limit
         )
@@ -157,7 +157,7 @@ if __name__ == "__main__":
         if (epoch + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
-            tr.set_description(f"SFT Epoch {epoch+1} | Loss: {loss.item():.4f}")
+            pbar.set_description(f"SFT Epoch {epoch+1} | Loss: {loss.item():.4f}")
     
     llm.save_pretrained(save_directory=output_dir)
     tokenizer.save_pretrained(save_directory=output_dir)
