@@ -36,7 +36,7 @@ def evaluate_vllm(
     batch_size = 32
     num_batches = (len(prompts) + batch_size - 1) // batch_size
     responses: List[str] = []
-    for i in tqdm(range(num_batches)):
+    for i in tqdm(range(num_batches), desc="generating responses"):
         batch_prompts = prompts[i * batch_size : (i + 1) * batch_size]
         outputs = vllm_model.generate(
             batch_prompts,
@@ -47,7 +47,7 @@ def evaluate_vllm(
             responses.append(gen_text)
 
     eval_entries: List[EvalEntry] = []
-    for ground_truth, resp in tqdm(zip(ground_truths, responses)):
+    for ground_truth, resp in tqdm(zip(ground_truths, responses), desc="evaluating responses"):
         reward_dict = reward_fn(resp, ground_truth)
 
         resp_answer = parse(resp)
