@@ -31,7 +31,7 @@ def init_vllm(
         return LLM(
             model=model_id,
             device=device,
-            dtype=str(torch.bfloat16),
+            dtype=torch.bfloat16, # type: ignore
             enable_prefix_caching=True,
             gpu_memory_utilization=gpu_memory_utilization,
         )
