@@ -144,7 +144,7 @@ if __name__ == "__main__":
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True
 
-    if sft_config.eval_interval > 0:
+    if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
         from datasets import load_dataset
         ds = load_dataset("hkust-nlp/dart-math-uniform")
         train: datasets.Dataset = ds["train"] # type: ignore
