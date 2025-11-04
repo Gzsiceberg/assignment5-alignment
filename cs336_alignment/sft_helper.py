@@ -27,18 +27,13 @@ def get_response_log_probs(
 ) -> dict[str, torch.Tensor]:
     batch_size, seq_len = input_ids.shape
     logits = model(input_ids=input_ids).logits
-    log_probs = torch.log_softmax(logits, dim=-1)
-    labels_unsqueezed = labels.unsqueeze(-1)
-    assert labels_unsqueezed.shape == (batch_size, seq_len, 1)
-    log_probs_for_labels = torch.gather(
-        log_probs, dim=-1, index=labels_unsqueezed.long()
-    ).squeeze(-1)
+    gathered = logits.gather(dim=-1, index=labels.long().unsqueeze(-1)).squeeze(-1)
+    row_logsumexp = torch.logsumexp(logits, dim=-1)
+    log_probs_for_labels = gathered - row_logsumexp
 
     result: dict[str, torch.Tensor] = {"log_probs": log_probs_for_labels}
     if return_token_entropy:
-        probs = torch.exp(log_probs)
-        entropy = -torch.sum(probs * log_probs, dim=-1)
-        result["token_entropy"] = entropy
+        result["token_entropy"] = compute_entropy(logits)
     return result
 
 

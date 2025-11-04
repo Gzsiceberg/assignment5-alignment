@@ -2,5 +2,5 @@ model_id: "Qwen/Qwen2.5-0.5B"
 num_epochs: 5
 learning_rate: 5e-5
 gradient_accumulation_steps: 32
-micro_batch_size: 1
+micro_batch_size: 2
 eval_interval: 1

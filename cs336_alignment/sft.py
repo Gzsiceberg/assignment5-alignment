@@ -218,10 +218,9 @@ if __name__ == "__main__":
             assert batch_resp_mask.shape == (batch_size, sample_content_length)
             with amp_ctx:
                 results = get_response_log_probs(
-                    llm, batch_input_ids, batch_labels, return_token_entropy=True # type: ignore
+                    llm, batch_input_ids, batch_labels, return_token_entropy=False # type: ignore
                 )
                 log_probs = results["log_probs"]
-                token_entropy = results["token_entropy"]
                 loss, meta_data = sft_microbatch_train_step(
                     log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
                 )
@@ -232,8 +231,8 @@ if __name__ == "__main__":
         lr_scheduler.step()
         optimizer.zero_grad()
         current_lr = lr_scheduler.get_last_lr()[0] 
-        pbar.set_description(f"Loss: {total_loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {current_lr:.6f}") # type: ignore
-        
+        pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}") # type: ignore
+
         is_last_step = st == training_steps - 1
         if vllm_model is not None and ((st + 1) % eval_interval == 0 or is_last_step):
             print_and_log(f"Running evaluation at step {st+1}...")
