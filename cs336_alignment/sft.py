@@ -209,7 +209,7 @@ if __name__ == "__main__":
         if (st + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
-            pbar.set_description(f"Loss: {loss.item():.4f}")
+            pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f}")
         
         is_last_step = st == sft_config.num_steps - 1
         
