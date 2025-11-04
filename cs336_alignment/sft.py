@@ -138,7 +138,7 @@ if __name__ == "__main__":
 
     example_count = input_ids.shape[0]
     batch_size = sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
-    training_steps = sft_config.num_epochs * example_count // sft_config.micro_batch_size
+    training_steps = sft_config.num_epochs * example_count // batch_size
     print(f"Total training steps: {training_steps} batch size: {batch_size} example count: {example_count}")
 
     from vllm.sampling_params import SamplingParams
@@ -204,30 +204,28 @@ if __name__ == "__main__":
     )
 
     for st in pbar:
-        random_index = np.random.randint(0, sample_count, size=batch_size)
-        batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
-        assert batch_input_ids.shape == (batch_size, sample_content_length)
-        assert batch_labels.shape == (batch_size, sample_content_length)
-        assert batch_resp_mask.shape == (batch_size, sample_content_length)
-
-        with amp_ctx:
-            results = get_response_log_probs(
-                llm, batch_input_ids, batch_labels, return_token_entropy=True
+        for _ in range(gradient_accumulation_steps):
+            random_index = np.random.randint(0, sample_count, size=batch_size)
+            batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
+            assert batch_input_ids.shape == (batch_size, sample_content_length)
+            assert batch_labels.shape == (batch_size, sample_content_length)
+            assert batch_resp_mask.shape == (batch_size, sample_content_length)
+            with amp_ctx:
+                results = get_response_log_probs(
+                    llm, batch_input_ids, batch_labels, return_token_entropy=True
+                )
+                log_probs = results["log_probs"]
+                token_entropy = results["token_entropy"]
+            loss, meta_data = sft_microbatch_train_step(
+                log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
             )
-            log_probs = results["log_probs"]
-            token_entropy = results["token_entropy"]
-        loss, meta_data = sft_microbatch_train_step(
-            log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
-        )
 
-        if (st + 1) % gradient_accumulation_steps == 0:
-            optimizer.step()
-            optimizer.zero_grad()
-            lr_scheduler.step()
-            pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {lr_scheduler.get_last_lr()[0]:.6f}")
+        optimizer.step()
+        optimizer.zero_grad()
+        lr_scheduler.step()
+        pbar.set_description(f"Loss: {loss.item():.4f} avg_token_entropy: {token_entropy.mean().item():.4f} lr: {lr_scheduler.get_last_lr()[0]:.6f}")
         
         is_last_step = st == training_steps - 1
-        
         if vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
             print_and_log(f"Running evaluation at step {st+1}...")
             load_policy_into_vllm_instance(llm, vllm_model) # # type: ignore
