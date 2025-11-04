@@ -1,6 +1,5 @@
-model_id: Qwen/Qwen1.5-0.5B
-learning_rate: 1e-5
-gradient_accumulation_steps: 1
-num_epochs: 5
-batch_size: 1
-limit: 128
+learning_rate: 1e-4
+gradient_accumulation_steps: 16
+num_epochs: 2048
+batch_size: 2
+limit: 1024
