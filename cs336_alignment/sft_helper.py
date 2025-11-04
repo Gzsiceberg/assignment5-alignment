@@ -4,6 +4,7 @@ import torch
 from datasets import load_dataset
 import datasets
 from tqdm import tqdm
+from jaxtyping import Float, Int, jaxtyped, Bool
 
 
 def masked_normalize(
@@ -18,14 +19,17 @@ def masked_normalize(
 
 def get_response_log_probs(
     model: PreTrainedModel,
-    input_ids: torch.Tensor,
-    labels: torch.Tensor,
+    input_ids: Int[torch.Tensor, "batch seq_len"],
+    labels: Int[torch.Tensor, "batch seq_len"],
     return_token_entropy: bool = False,
 ) -> dict[str, torch.Tensor]:
+    batch_size, seq_len = input_ids.shape
     logits = model(input_ids=input_ids).logits
     log_probs = torch.log_softmax(logits, dim=-1)
+    labels_unsqueezed = labels.unsqueeze(-1)
+    assert labels_unsqueezed.shape == (batch_size, seq_len, 1)
     log_probs_for_labels = torch.gather(
-        log_probs, dim=-1, index=labels.unsqueeze(-1)
+        log_probs, dim=-1, index=labels_unsqueezed.long()
     ).squeeze(-1)
 
     result: dict[str, torch.Tensor] = {"log_probs": log_probs_for_labels}

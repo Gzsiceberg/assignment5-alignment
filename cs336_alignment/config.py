@@ -10,6 +10,7 @@ class SftConfig(BaseModel):
     batch_size: int = 128
     gradient_accumulation_steps: int = 8
     num_epochs: int = 10
+    limit: int = 128
 
 
 def load_config_from_file(config_path: str) -> dict:

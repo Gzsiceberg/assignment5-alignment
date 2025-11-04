@@ -5,6 +5,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 from unittest.mock import patch
 import torch
 import numpy as np
+from einops import rearrange, einsum
+
 
 
 def init_vllm(
@@ -49,12 +51,26 @@ def get_batch(
     labels: np.ndarray,
     resp_mask: np.ndarray,
     batch_size: int,
+    context_length: int,
+    limit_samples: int = -1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    sample_count = input_ids.shape[0]
-    indices = np.random.randint(0, sample_count, size=batch_size)
+    sample_count = input_ids.shape[0] - context_length
+    if limit_samples > 0:
+        sample_count = min(limit_samples, sample_count)
+    start_idx = np.random.randint(0, sample_count, size=batch_size)
+
+    start_idx = rearrange(start_idx, "batch -> batch 1")
+    idx_range = np.arange(context_length)
+    idx_range = rearrange(idx_range, "seq_len -> 1 seq_len")
+    indices = start_idx + idx_range
+
     batch_input_ids = input_ids[indices]
     batch_labels = labels[indices]
     batch_resp_mask = resp_mask[indices]
+
+    assert batch_input_ids.shape == (batch_size, context_length)
+    assert batch_labels.shape == (batch_size, context_length)
+    assert batch_resp_mask.shape == (batch_size, context_length)
     return (
         torch.from_numpy(batch_input_ids),
         torch.from_numpy(batch_labels),
@@ -68,9 +84,8 @@ if __name__ == "__main__":
     import numpy as np
     import random
     from cs336_alignment.config import load_config_from_file, SftConfig
-    import datasets
-    from datasets import load_dataset
     from cs336_alignment.logger import setup_logging, print_and_log
+    from rich import print
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
@@ -96,27 +111,21 @@ if __name__ == "__main__":
         "models/Qwen/Qwen2.5-Math-1.5B",
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
-        default_device=train_device,
+        device_map=train_device,
     )
     tokenizer = AutoTokenizer.from_pretrained("models/Qwen/Qwen2.5-Math-1.5B")
 
-    ds = load_dataset("hkust-nlp/dart-math-uniform")
-    train: datasets.Dataset = ds["train"]  # type: ignore
+    context_length = llm.config.max_position_embeddings
+    print_and_log(f"Model context length: {context_length}")
 
-    output_dir = "models/sft"
+    output_dir = f"models/sft_model_{config_name}"
     os.makedirs(output_dir, exist_ok=True)
-
-    # prompts, responses = extract_prompt_and_response(train)
-    # tokenized_data = tokenize_to_tensor(prompts, responses, tokenizer)
-    # input_ids = tokenized_data["input_ids"].to(train_device)
-    # labels = tokenized_data["labels"].to(train_device)
-    # resp_mask = tokenized_data["response_mask"].to(train_device)
 
     print_and_log("-" * 120)
     input_ids = np.memmap(f"data/input_ids_train.npy", mode="r", dtype=np.int32)
     labels = np.memmap(f"data/labels_train.npy", mode="r", dtype=np.int32)
     resp_mask = np.memmap(f"data/response_mask_train.npy", mode="r", dtype=bool)
-    print_and_log(f"Training data has {input_ids.shape[0]} tokens.")
+    print_and_log(f"Training data has {input_ids.shape[0] / 1_000_000:.2f}M tokens.")
 
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
@@ -127,8 +136,12 @@ if __name__ == "__main__":
     start_time = time.time()
     for epoch in range(sft_config.num_epochs):
         batch_input_ids, batch_labels, batch_resp_mask = get_batch(
-            input_ids, labels, resp_mask, batch_size
+            input_ids, labels, resp_mask, batch_size, context_length, sft_config.limit
         )
+        batch_input_ids = batch_input_ids.to(train_device)
+        batch_labels = batch_labels.to(train_device)
+        batch_resp_mask = batch_resp_mask.to(train_device)
+
         results = get_response_log_probs(
             llm, batch_input_ids, batch_labels, return_token_entropy=True
         )
@@ -141,6 +154,9 @@ if __name__ == "__main__":
         if (epoch + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
+    
+    llm.save_pretrained(save_directory=output_dir)
+    tokenizer.save_pretrained(save_directory=output_dir)
 
     end_time = time.time()
     print_and_log(

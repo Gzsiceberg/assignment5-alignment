@@ -24,6 +24,7 @@ dependencies = [
     "datasets>=2.19",
     "fsspec>=2025.3.2",
     "huggingface-hub>=0.31.1",
+    "jaxtyping>=0.3.3",
 ]
 
 [tool.setuptools.packages.find]
