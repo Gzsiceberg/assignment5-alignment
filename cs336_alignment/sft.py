@@ -80,36 +80,6 @@ def get_batch(
     )
 
 
-def eval_loss(
-    llm: PreTrainedModel,
-    input_ids: np.ndarray,
-    labels: np.ndarray,
-    resp_mask: np.ndarray,
-    batch_size: int,
-    context_length: int,
-) -> float:
-    from cs336_alignment.sft_helper import get_response_log_probs, sft_microbatch_eval_step
-    with torch.no_grad():
-        total_loss = torch.tensor(0.0, device=train_device)
-        eval_epochs = 128
-        tr = trange(eval_epochs, desc="Eval Loss Batches")
-        for it in tr:
-            batch_input_ids, batch_labels, batch_resp_mask = get_batch(
-                input_ids, labels, resp_mask, batch_size, context_length, sft_config.limit, base=4096
-            )
-            batch_input_ids = batch_input_ids.to(train_device)
-            batch_labels = batch_labels.to(train_device)
-            batch_resp_mask = batch_resp_mask.to(train_device)
-
-            results = get_response_log_probs(
-                llm, batch_input_ids, batch_labels, return_token_entropy=False
-            )
-            log_probs = results["log_probs"]
-            loss = sft_microbatch_eval_step(log_probs, batch_resp_mask, normalize_constant=1.0)
-            total_loss += loss
-    return total_loss.item() / eval_epochs
-
-
 if __name__ == "__main__":
     import os
     import argparse
@@ -206,8 +176,8 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
     batch_size = sft_config.batch_size
     start_time = time.time()
-    eval_time = start_time
     pbar = trange(sft_config.num_epochs, desc="SFT Epoch")
+    amp_ctx = torch.autocast(device_type=train_device, dtype=torch.bfloat16)
     for epoch in pbar:
         batch_input_ids, batch_labels, batch_resp_mask = get_batch(
             input_ids, labels, resp_mask, batch_size, context_length, sft_config.limit
@@ -216,11 +186,12 @@ if __name__ == "__main__":
         batch_labels = batch_labels.to(train_device)
         batch_resp_mask = batch_resp_mask.to(train_device)
 
-        results = get_response_log_probs(
-            llm, batch_input_ids, batch_labels, return_token_entropy=True
-        )
-        log_probs = results["log_probs"]
-        token_entropy = results["token_entropy"]
+        with amp_ctx:
+            results = get_response_log_probs(
+                llm, batch_input_ids, batch_labels, return_token_entropy=True
+            )
+            log_probs = results["log_probs"]
+            token_entropy = results["token_entropy"]
         loss, meta_data = sft_microbatch_train_step(
             log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
         )
@@ -243,17 +214,6 @@ if __name__ == "__main__":
                 sampling_params,
                 dump_data=False
             )
-        elif time.time() - eval_time > 60 or is_last_step:
-            eval_loss_value = eval_loss(
-                llm,
-                input_ids,
-                labels,
-                resp_mask,
-                batch_size,
-                context_length,
-            )
-            print_and_log(f"Intermediate eval loss: {eval_loss_value:.4f}")
-            eval_time = time.time()
 
     
     llm.save_pretrained(save_directory=output_dir)
