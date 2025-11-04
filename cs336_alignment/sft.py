@@ -1,7 +1,7 @@
 import logging
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from vllm import LLM
-from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel # type: ignore
 from unittest.mock import patch
 import torch
 import numpy as np
@@ -42,7 +42,7 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
     22759c820867c8659d00082ba8cf004e963873c1/trl/trainer/grpo_trainer.py#L670.
     """
     state_dict = policy.state_dict()
-    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
+    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model # type: ignore
     llm_model.load_weights(state_dict.items())
 
 
@@ -52,14 +52,9 @@ def get_batch(
     resp_mask: np.ndarray,
     batch_size: int,
     context_length: int,
-    limit_samples: int = -1,
-    base: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     sample_count = input_ids.shape[0] - context_length
-    if limit_samples > 0:
-        sample_count = min(limit_samples, sample_count)
-    assert limit_samples + base + context_length <= input_ids.shape[0]
-    start_idx = np.random.randint(0, sample_count, size=batch_size) + base
+    start_idx = np.random.randint(0, sample_count, size=batch_size)
 
     start_idx = rearrange(start_idx, "batch -> batch 1")
     idx_range = np.arange(context_length)
@@ -179,9 +174,7 @@ if __name__ == "__main__":
     pbar = trange(sft_config.num_epochs, desc="SFT Epoch")
     amp_ctx = torch.autocast(device_type=train_device, dtype=torch.bfloat16)
     for epoch in pbar:
-        batch_input_ids, batch_labels, batch_resp_mask = get_batch(
-            input_ids, labels, resp_mask, batch_size, context_length, sft_config.limit
-        )
+        batch_input_ids, batch_labels, batch_resp_mask = get_batch(input_ids, labels, resp_mask, batch_size, context_length)
         batch_input_ids = batch_input_ids.to(train_device)
         batch_labels = batch_labels.to(train_device)
         batch_resp_mask = batch_resp_mask.to(train_device)
