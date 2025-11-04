@@ -106,11 +106,14 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
+
+    # warning: flash-attn currently only supports certain CUDA and PyTorch versions.
+    # uv add flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.4.11/flash_attn-2.8.3%2Bcu128torch2.5-cp312-cp312-linux_x86_64.whl" }
     train_device = "cuda:0"
     llm = AutoModelForCausalLM.from_pretrained(
         f"models/{sft_config.model_id}",
         torch_dtype=torch.bfloat16,
-        attn_implementation="sdpa",
+        attn_implementation="flash_attention_2",
         device_map=train_device,
     )
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
