@@ -206,7 +206,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
     batch_size = sft_config.batch_size
     start_time = time.time()
-
+    eval_time = start_time
     pbar = trange(sft_config.num_epochs, desc="SFT Epoch")
     for epoch in pbar:
         batch_input_ids, batch_labels, batch_resp_mask = get_batch(
@@ -243,7 +243,7 @@ if __name__ == "__main__":
                 sampling_params,
                 dump_data=False
             )
-        elif time.time() - start_time > 60 or is_last_step:
+        elif time.time() - eval_time > 60 or is_last_step:
             eval_loss_value = eval_loss(
                 llm,
                 input_ids,
@@ -253,6 +253,7 @@ if __name__ == "__main__":
                 context_length,
             )
             print_and_log(f"Intermediate eval loss: {eval_loss_value:.4f}")
+            eval_time = time.time()
 
     
     llm.save_pretrained(save_directory=output_dir)
