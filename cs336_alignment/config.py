@@ -11,7 +11,6 @@ class SftConfig(BaseModel):
     batch_size: int = 128
     gradient_accumulation_steps: int = 8
     num_epochs: int = 10
-    limit: int = 128
     eval_interval: int = -1
 
 

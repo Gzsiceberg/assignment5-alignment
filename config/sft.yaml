@@ -2,4 +2,3 @@ learning_rate: 1e-4
 gradient_accumulation_steps: 16
 num_epochs: 2048
 batch_size: 2
-limit: 1024
