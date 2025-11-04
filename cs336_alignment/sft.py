@@ -181,7 +181,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
     batch_size = sft_config.batch_size
     start_time = time.time()
-    pbar = trange(sft_config.num_steps, desc="SFT Epoch")
+    pbar = trange(sft_config.num_steps, desc="SFT Training Steps")
     amp_ctx = torch.autocast(device_type=train_device, dtype=torch.bfloat16)
     if sft_config.compile_model:
         print_and_log("Compiling model...")
@@ -214,7 +214,7 @@ if __name__ == "__main__":
         is_last_step = st == sft_config.num_steps - 1
         
         if vllm_model and sft_config.eval_interval > 0 and ((st + 1) % sft_config.eval_interval == 0 or is_last_step):
-            print_and_log(f"Running evaluation at epoch {st+1}...")
+            print_and_log(f"Running evaluation at step {st+1}...")
             load_policy_into_vllm_instance(llm, vllm_model) # # type: ignore
             evaluate_vllm(
                 vllm_model,
@@ -231,7 +231,7 @@ if __name__ == "__main__":
 
     end_time = time.time()
     print_and_log(
-        f"Training time for {sft_config.num_steps} epochs: {end_time - start_time} seconds."
+        f"Training time for {sft_config.num_steps} steps: {end_time - start_time} seconds."
     )
     logging.shutdown()
     import torch.distributed as dist
