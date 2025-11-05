@@ -130,6 +130,7 @@ def train_sft(
                     from cs336_alignment.sft_helper import masked_normalize
                     with torch.no_grad():
                         token_entropy = results["token_entropy"]
+                        assert token_entropy.shape == (micro_batch_size, sample_content_length)
                         avg_token_entropy = masked_normalize(token_entropy, batch_resp_mask, normalize_constant=micro_batch_size)
                         total_entropy += avg_token_entropy.detach()
                     
