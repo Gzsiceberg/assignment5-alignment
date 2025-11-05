@@ -9,6 +9,7 @@ from einops import rearrange, einsum
 from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 import torch.distributed as dist
 from cs336_alignment.config import SftConfig
+from cs336_alignment.logger import print_and_log
 
 
 def get_batch(
