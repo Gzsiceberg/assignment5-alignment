@@ -152,7 +152,7 @@ if __name__ == "__main__":
     prompts = []
     ground_truths = []
     sampling_params = SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=context_length, stop=["\n"]
+        temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
     )
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True
@@ -164,7 +164,7 @@ if __name__ == "__main__":
         ds = load_dataset("hkust-nlp/dart-math-uniform")
         train: Dataset = ds["train"] # type: ignore
         print(f"Total test samples: {len(train)}")
-        prompts, ground_truths = extract_prompt_and_response(train, 512, 1024)
+        prompts, ground_truths = extract_prompt_and_response(train, 256, 1024)
 
         print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(
