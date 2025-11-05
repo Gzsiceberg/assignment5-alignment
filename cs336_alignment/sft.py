@@ -187,7 +187,7 @@ if __name__ == "__main__":
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
     from tqdm import tqdm, trange
-    from transformers import get_cosine_schedule_with_warmup
+    from transformers import get_cosine_schedule_with_warmup # type: ignore
 
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)

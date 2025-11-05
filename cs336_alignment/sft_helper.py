@@ -324,6 +324,7 @@ if __name__ == "__main__":
     print(labels.shape)
 
     import numpy as np
+    print("Saving tokenized data to .npy files...")
     np.save("data/input_ids_tensor.npy", input_ids.numpy())
     np.save("data/response_mask_tensor.npy", response_mask.numpy())
     np.save("data/labels_tensor.npy", labels.numpy())
