@@ -8,6 +8,7 @@ def init_vllm(
     model_id: str, device: str, seed: int, gpu_memory_utilization: float = 0.85
 ):
     from vllm.model_executor import set_random_seed as vllm_set_random_seed
+
     """
     Start the inference process, here we use vLLM to hold a model on a GPU separate from the policy.
     """
@@ -88,8 +89,8 @@ if __name__ == "__main__":
         dump_data=False,
     )
 
-
     import torch.distributed as dist
+
     if dist.is_available() and dist.is_initialized():
         try:
             dist.destroy_process_group()
