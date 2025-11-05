@@ -183,6 +183,8 @@ if __name__ == "__main__":
             resp_mask=response_mask,
         )
     
-    llm.save_pretrained(save_directory=output_dir)  # type: ignore
-    tokenizer.save_pretrained(save_directory=output_dir)
+    if llm is not None:
+        print_and_log(f"Saving fine-tuned model to {output_dir}...")
+        llm.save_pretrained(save_directory=output_dir)  # type: ignore
+        tokenizer.save_pretrained(save_directory=output_dir)
     cleanup()
