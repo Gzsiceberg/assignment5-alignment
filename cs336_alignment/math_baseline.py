@@ -113,6 +113,7 @@ Assistant: <think>"""
             if len(answer_text) < resp_length:
                 # Update to a shorter response
                 responses[index] = answer_text
+                query_to_index[q_key] = (index, len(answer_text))
             continue
         else:
             unique_queries[q_key] = 1
