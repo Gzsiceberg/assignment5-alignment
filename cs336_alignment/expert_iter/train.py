@@ -14,6 +14,11 @@ import logging
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  # type: ignore
 import torch
 import os
+import random
+from cs336_alignment.sft_helper import tokenize_to_tensor
+from cs336_alignment.sft import train_sft
+from cs336_alignment.config import SftConfig, ExpertIterConfig, load_config_from_file
+from cs336_alignment.logger import setup_logging, print_and_log
 
 
 def cleanup():
@@ -51,12 +56,6 @@ def expert_iter_gen(
 
 
 if __name__ == "__main__":
-    from rich import print
-    from cs336_alignment.sft_helper import tokenize_to_tensor
-    from cs336_alignment.sft import train_sft
-    from cs336_alignment.config import SftConfig, ExpertIterConfig, load_config_from_file
-    from cs336_alignment.logger import setup_logging, print_and_log
-    import random
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -172,13 +171,13 @@ if __name__ == "__main__":
                 attn_implementation="flash_attention_2",
                 device_map={"": train_device},
             )
-            llm.train()  # set model to training mode
+            llm.train()  # type: ignore
 
         print_and_log("Starting SFT training step...")
         train_sft(
             sft_config,
             train_device,
-            llm=llm,
+            llm=llm, # type: ignore
             input_ids=input_ids,
             labels=labels,
             resp_mask=response_mask,

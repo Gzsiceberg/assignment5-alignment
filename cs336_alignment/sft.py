@@ -9,13 +9,13 @@ from vllm import LLM
 from vllm.sampling_params import SamplingParams
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  # type: ignore
 from einops import rearrange, einsum
-from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 import torch.distributed as dist
-from sft_helper import get_response_log_probs, sft_microbatch_train_step
 from tqdm import tqdm, trange
 from transformers import get_cosine_schedule_with_warmup  # type: ignore
+from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 from cs336_alignment.config import load_config_from_file, SftConfig
 from cs336_alignment.logger import setup_logging, print_and_log
+from cs336_alignment.sft_helper import masked_normalize, get_response_log_probs, sft_microbatch_train_step
 
 
 def get_batch(
@@ -130,7 +130,6 @@ def train_sft(
                 )
                 log_probs = results["log_probs"]
                 if print_entropy:
-                    from cs336_alignment.sft_helper import masked_normalize
                     with torch.no_grad():
                         token_entropy = results["token_entropy"]
                         assert token_entropy.shape == (micro_batch_size, sample_content_length)
