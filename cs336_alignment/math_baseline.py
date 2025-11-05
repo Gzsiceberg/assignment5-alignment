@@ -129,7 +129,10 @@ if __name__ == "__main__":
     prompts, ground_truths = get_evaluation_samples(args.limit, args.offset)
     sampling_params = get_evaluation_sample_params()
 
-    model = LLM(model=f"models/{args.model_id}")
+    model = LLM(model=f"models/{args.model_id}", 
+                dtype=torch.bfloat16, # type: ignore
+                enable_prefix_caching=True,
+                gpu_memory_utilization=0.85)
     evaluate_vllm(
         vllm_model=model,
         reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
@@ -145,6 +148,3 @@ if __name__ == "__main__":
             dist.destroy_process_group()
         except Exception:
             pass
-
-
-# %%
