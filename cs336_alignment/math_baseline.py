@@ -98,22 +98,38 @@ Assistant: <think>"""
     prompts: List[str] = []
     responses: List[str] = []
     unique_queries: dict[str, int] = {}
-    for t, data in tqdm(enumerate(ds), desc="Generating prompts and ground truths", total=len(ds), leave=False):
+    offset_queries: set[str] = set()
+    query_to_index: dict[str, tuple[int, int]] = {}
+
+    for data in tqdm(ds, desc="Generating prompts and ground truths", total=len(ds), leave=False):
         question: str = data["query"] # type: ignore
         q_key = question.lower().strip()
+        answer_text: str = data["response"] # type: ignore
         if q_key in unique_queries:
             unique_queries[q_key] += 1
+            if q_key in offset_queries:
+                continue
+            (index, resp_length) = query_to_index[q_key]
+            if len(answer_text) < resp_length:
+                # Update to a shorter response
+                responses[index] = answer_text
             continue
         else:
             unique_queries[q_key] = 1
-            if len(unique_queries) <= offset:
+            if len(offset_queries) < offset:
+                offset_queries.add(q_key)
+            if q_key in offset_queries:
                 continue
-        answer_text: str = data["response"] # type: ignore
         full_prompt = prompt_templ.format(question)
         prompts.append(full_prompt)
+        query_to_index[q_key] = (len(prompts) - 1, len(answer_text))
         responses.append(answer_text)
         if len(prompts) >= limit:
             break
+    min_response_length = min([len(resp) for resp in responses])
+    max_response_length = max([len(resp) for resp in responses])
+    print(f"Generated {len(prompts)} unique prompts.")
+    print(f"Response length - min: {min_response_length}, max: {max_response_length}")
     return prompts, responses
 
 

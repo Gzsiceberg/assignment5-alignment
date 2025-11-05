@@ -256,10 +256,10 @@ def extract_prompt_and_response(ds: datasets.Dataset, limit: int, offset: int) -
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
-    offset_queries: set[str] = set()
     prompts: list[str] = []
     responses: list[str] = []
     unique_queries: dict[str, int] = {}
+    offset_queries: set[str] = set()
     query_to_index: dict[str, tuple[int, int]] = {}
     is_all: bool = limit <= 0
     for data in tqdm(ds, total=len(ds), desc="Extracting prompts and responses"):
