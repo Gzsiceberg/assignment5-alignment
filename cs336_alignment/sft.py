@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from einops import rearrange, einsum
 from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
+import torch.distributed as dist
 
 
 def get_batch(
@@ -34,6 +35,14 @@ def get_batch(
         torch.from_numpy(batch_labels),
         torch.from_numpy(batch_resp_mask),
     )
+
+def cleanup():
+    logging.shutdown()
+    if dist.is_available() and dist.is_initialized():
+        try:
+            dist.destroy_process_group()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
@@ -150,6 +159,7 @@ if __name__ == "__main__":
 
     if is_eval_only:
         print_and_log("Evaluation only mode, exiting after evaluation.")
+        cleanup()
         exit(0)
 
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
@@ -230,11 +240,4 @@ if __name__ == "__main__":
         f"Training time for {training_steps} steps: {end_time - start_time} seconds."
     )
 
-    logging.shutdown()
-    import torch.distributed as dist
-
-    if dist.is_available() and dist.is_initialized():
-        try:
-            dist.destroy_process_group()
-        except Exception:
-            pass
+    cleanup()
