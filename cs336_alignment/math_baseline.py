@@ -100,9 +100,10 @@ def get_evaluation_samples(limit: int, offset: int) -> tuple[List[str], List[str
     prompts, ground_truths = extract_prompt_and_response(train, limit, offset)
     return prompts, ground_truths
 
-def get_evaluation_sample_params() -> SamplingParams:
+def get_evaluation_sample_params(n: int = 1) -> SamplingParams:
     sampling_params = SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
+        temperature=1.0, top_p=1.0, max_tokens=4096, min_tokens=4, stop=["\n"], seed=42,
+        n=n,
     )
     sampling_params.stop = ["</answer>"]
     sampling_params.include_stop_str_in_output = True

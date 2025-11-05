@@ -6,7 +6,7 @@ import torch
 
 def init_vllm(
     model_id: str, device: str, seed: int, gpu_memory_utilization: float = 0.85
-):
+) -> LLM:
     from vllm.model_executor import set_random_seed as vllm_set_random_seed
 
     """

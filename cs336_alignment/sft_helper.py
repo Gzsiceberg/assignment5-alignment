@@ -33,7 +33,8 @@ def get_response_log_probs(
 
     result: dict[str, torch.Tensor] = {"log_probs": log_probs_for_labels}
     if return_token_entropy:
-        result["token_entropy"] = compute_entropy(logits)
+        with torch.no_grad():
+            result["token_entropy"] = compute_entropy(logits)
     return result
 
 

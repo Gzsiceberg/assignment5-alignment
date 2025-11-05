@@ -14,6 +14,7 @@ class SftConfig(BaseModel):
     eval_interval: int = -1
     max_examples: int = 1024
     compile_model: bool = False
+    clip_gradients: float = 0.0
 
 
 def load_config_from_file(config_path: str) -> dict:
