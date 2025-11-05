@@ -121,16 +121,14 @@ if __name__ == "__main__":
     prompts = []
     ground_truths = []
     sampling_params: SamplingParams = get_evaluation_sample_params()
-
-    from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
-
+    is_eval_only = args.eval
     if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
         prompts, ground_truths = get_evaluation_samples(256, 1024)
 
         print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(
             model_id=f"models/{args.model_id}",
-            device="cuda:1",
+            device="cuda:1" if not is_eval_only else "cuda:0",
             seed=seed,
             gpu_memory_utilization=0.85,
         )
@@ -145,7 +143,7 @@ if __name__ == "__main__":
             dump_data=False,
         )
 
-    if args.eval:
+    if is_eval_only:
         print_and_log("Evaluation only mode, exiting after evaluation.")
         exit(0)
 
