@@ -129,7 +129,8 @@ if __name__ == "__main__":
                 seed=42,
                 gpu_memory_utilization=0.85,
             )
-            load_policy_into_vllm_instance(llm, vllm)
+            if llm is not None:
+                load_policy_into_vllm_instance(llm, vllm)
 
         sft_prompts = []
         sft_responses = []
