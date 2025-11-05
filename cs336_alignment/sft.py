@@ -146,25 +146,15 @@ if __name__ == "__main__":
     print_and_log(f"Evaluation interval (in steps): {eval_interval}")
 
     from vllm.sampling_params import SamplingParams
-    from cs336_alignment.math_baseline import evaluate_vllm
-    from cs336_alignment.extract import extract_prompt_and_response
+    from cs336_alignment.math_baseline import evaluate_vllm, get_evaluation_sample_params, get_evaluation_samples
     vllm_model = None
     prompts = []
     ground_truths = []
-    sampling_params = SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
-    )
-    sampling_params.stop = ["</answer>"]
-    sampling_params.include_stop_str_in_output = True
+    sampling_params: SamplingParams = get_evaluation_sample_params()
 
-    from datasets import load_dataset, Dataset
     from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
-
     if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
-        ds = load_dataset("hkust-nlp/dart-math-uniform")
-        train: Dataset = ds["train"] # type: ignore
-        print(f"Total test samples: {len(train)}")
-        prompts, ground_truths = extract_prompt_and_response(train, 256, 1024)
+        prompts, ground_truths = get_evaluation_samples(256, 1024)
 
         print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(

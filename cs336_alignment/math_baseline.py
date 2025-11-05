@@ -89,10 +89,26 @@ def evaluate_vllm(
 
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
+    
+
+def get_evaluation_samples(limit: int, offset: int) -> tuple[List[str], List[str]]:
+    ds = load_dataset("hkust-nlp/dart-math-uniform")
+    train: datasets.Dataset = ds["train"] # type: ignore
+    prompts, ground_truths = extract_prompt_and_response(train, limit, offset)
+    return prompts, ground_truths
+
+def get_evaluation_sample_params() -> SamplingParams:
+    sampling_params = SamplingParams(
+        temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
+    )
+    sampling_params.stop = ["</answer>"]
+    sampling_params.include_stop_str_in_output = True
+    return sampling_params
 
 
 if __name__ == "__main__":
     import argparse
+    import torch
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -105,22 +121,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.makedirs("data", exist_ok=True)
 
-    ds = load_dataset("hkust-nlp/dart-math-uniform")
-    train: datasets.Dataset = ds["train"] # type: ignore
-    
-    import torch
     gpu_count = torch.cuda.device_count()
     print(f"gpu count: {gpu_count}")
     assert gpu_count >= 1, "At least one GPU is required."
 
-    prompts, ground_truths = extract_prompt_and_response(train, args.limit, args.offset)
-    sampling_params = SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
-    )
-    sampling_params.stop = ["</answer>"]
-    sampling_params.include_stop_str_in_output = True
-    model = LLM(model=f"models/{args.model_id}")
+    prompts, ground_truths = get_evaluation_samples(args.limit, args.offset)
+    sampling_params = get_evaluation_sample_params()
 
+    model = LLM(model=f"models/{args.model_id}")
     evaluate_vllm(
         vllm_model=model,
         reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
