@@ -256,6 +256,7 @@ def extract_prompt_and_response(ds: datasets.Dataset, limit: int, offset: int) -
     prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: {0}
 Assistant: <think>"""
+    offset_queries: set[str] = set()
     prompts: list[str] = []
     responses: list[str] = []
     unique_queries: dict[str, int] = {}
@@ -267,6 +268,8 @@ Assistant: <think>"""
         resp: str = data["response"]  # type: ignore
         if q_key in unique_queries:
             unique_queries[q_key] += 1
+            if q_key in offset_queries:
+                continue
             (index, resp_length) = query_to_index[q_key]
             if len(resp) < resp_length:
                 # Update to a shorter response
@@ -275,7 +278,9 @@ Assistant: <think>"""
             continue
         else:
             unique_queries[q_key] = 1
-            if len(unique_queries) <= offset and not is_all:
+            if len(offset_queries) < offset:
+                offset_queries.add(q_key)
+            if q_key in offset_queries and not is_all:
                 continue
         if len(prompts) >= limit and not is_all:
             break
@@ -289,6 +294,7 @@ Assistant: <think>"""
     max_occurrence = list_occurrences.max()
     min_occurrence = list_occurrences.min()
     std_occurrence = list_occurrences.std()
+    print(f"offset queries: {len(offset_queries)}")
     print(f"Mean occurrence: {mean_occurrence:.2f}, Max occurrence: {max_occurrence}, Min occurrence: {min_occurrence}, Std occurrence: {std_occurrence:.2f}")
     return prompts, responses
 
