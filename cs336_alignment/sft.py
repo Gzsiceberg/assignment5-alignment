@@ -1,15 +1,21 @@
 import logging
+import time
 from typing import Callable
+import os
+import numpy as np
+import random
+import torch
 from vllm import LLM
 from vllm.sampling_params import SamplingParams
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  # type: ignore
-import torch
-import numpy as np
 from einops import rearrange, einsum
 from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 import torch.distributed as dist
-from cs336_alignment.config import SftConfig
-from cs336_alignment.logger import print_and_log
+from sft_helper import get_response_log_probs, sft_microbatch_train_step
+from tqdm import tqdm, trange
+from transformers import get_cosine_schedule_with_warmup  # type: ignore
+from cs336_alignment.config import load_config_from_file, SftConfig
+from cs336_alignment.logger import setup_logging, print_and_log
 
 
 def get_batch(
@@ -169,13 +175,7 @@ def train_sft(
 
 
 if __name__ == "__main__":
-    import os
     import argparse
-    import numpy as np
-    import random
-    from cs336_alignment.config import load_config_from_file, SftConfig
-    from cs336_alignment.logger import setup_logging, print_and_log
-    from rich import print
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
@@ -266,11 +266,6 @@ if __name__ == "__main__":
         cleanup()
         exit(0)
 
-    from sft_helper import get_response_log_probs, sft_microbatch_train_step
-    import time
-    from tqdm import tqdm, trange
-    from transformers import get_cosine_schedule_with_warmup  # type: ignore
-
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
     if sft_config.compile_model:
         print_and_log("Compiling model...")
@@ -278,7 +273,7 @@ if __name__ == "__main__":
     train_sft(
         sft_config,
         train_device,
-        llm,
+        llm, # type: ignore
         input_ids,
         labels,
         resp_mask,
