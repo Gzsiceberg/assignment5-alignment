@@ -146,7 +146,8 @@ if __name__ == "__main__":
     print_and_log(f"Evaluation interval (in steps): {eval_interval}")
 
     from vllm.sampling_params import SamplingParams
-    from math_baseline import generate_prompt_and_gt, evaluate_vllm
+    from cs336_alignment.math_baseline import evaluate_vllm
+    from cs336_alignment.extract import extract_prompt_and_response
     vllm_model = None
     prompts = []
     ground_truths = []
@@ -163,7 +164,7 @@ if __name__ == "__main__":
         ds = load_dataset("hkust-nlp/dart-math-uniform")
         train: Dataset = ds["train"] # type: ignore
         print(f"Total test samples: {len(train)}")
-        prompts, ground_truths = generate_prompt_and_gt(train, 512, 1024)
+        prompts, ground_truths = extract_prompt_and_response(train, 512, 1024)
 
         print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(
