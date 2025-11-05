@@ -112,6 +112,7 @@ if __name__ == "__main__":
     import torch
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("-s", "--seed", type=int, default=42, help="Random seed for evaluation.")
     parser.add_argument(
         "--limit", type=int, default=512, help="Number of samples to evaluate on."
     )
@@ -129,6 +130,8 @@ if __name__ == "__main__":
     prompts, ground_truths = get_evaluation_samples(args.limit, args.offset)
     sampling_params = get_evaluation_sample_params()
 
+    from vllm.model_executor import set_random_seed as vllm_set_random_seed
+    vllm_set_random_seed(args.seed)
     model = LLM(model=f"models/{args.model_id}", 
                 dtype=torch.bfloat16, # type: ignore
                 enable_prefix_caching=True,
