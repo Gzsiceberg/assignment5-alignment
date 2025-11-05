@@ -222,6 +222,7 @@ if __name__ == "__main__":
                     llm, batch_input_ids, batch_labels, return_token_entropy=False # type: ignore
                 )
                 log_probs = results["log_probs"]
+                assert log_probs.shape == (batch_size, sample_content_length)
                 loss, meta_data = sft_microbatch_train_step(
                     log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
                 )
