@@ -90,6 +90,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--config", type=str, required=False, help="Path to config file"
     )
+    parser.add_argument(
+        "-e", "--eval", action="store_true", help="Run evaluation only"
+    )
+    parser.add_argument(
+        "-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID"
+    )
     args = parser.parse_args()
     config = load_config_from_file(args.config)
     config_name = os.path.splitext(os.path.basename(args.config))[0]
@@ -158,7 +164,7 @@ if __name__ == "__main__":
 
         print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(
-            model_id="models/Qwen/Qwen2.5-Math-1.5B",
+            model_id=f"models/{args.model_id}",
             device="cuda:1",
             seed=seed,
             gpu_memory_utilization=0.85,
@@ -174,6 +180,10 @@ if __name__ == "__main__":
             eval_sampling_params=sampling_params,
             dump_data=False
         )
+
+    if args.eval:
+        print_and_log("Evaluation only mode, exiting after evaluation.")
+        exit(0)
 
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
