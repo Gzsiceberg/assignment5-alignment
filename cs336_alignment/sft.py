@@ -98,10 +98,6 @@ def train_sft(
     print_and_log(f"Evaluation interval (in steps): {eval_interval}")
 
     start_time = time.time()
-    if sft_config.compile_model:
-        print_and_log("Compiling model...")
-        llm = torch.compile(llm)  # type: ignore
-
     warmup_steps = int(0.02 * training_steps)
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer, warmup_steps, training_steps
@@ -275,6 +271,9 @@ if __name__ == "__main__":
     from transformers import get_cosine_schedule_with_warmup  # type: ignore
 
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
+    if sft_config.compile_model:
+        print_and_log("Compiling model...")
+        llm = torch.compile(llm)  # type: ignore
     train_sft(
         sft_config,
         train_device,

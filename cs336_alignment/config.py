@@ -7,14 +7,21 @@ from pydantic import BaseModel
 
 class SftConfig(BaseModel):
     model_id: str = "Qwen/Qwen2.5-Math-1.5B"
-    num_epochs: int = 20
-    learning_rate: float = 1e-5
-    micro_batch_size: int = 128
+    num_epochs: int = 5
+    learning_rate: float = 5e-5
+    micro_batch_size: int = 8
     gradient_accumulation_steps: int = 8
     eval_interval: int = -1
     max_examples: int = 1024
     compile_model: bool = False
-    clip_gradients: float = 0.0
+    clip_gradients: float = 1.0
+
+class ExpertIterConfig(BaseModel):
+    question_batch_size: int = 512
+    vllm_batch_size: int = 64
+    sample_batch_size: int = 8
+    n_ei_steps: int = 5
+    output_model_dir: str = "expert_iter"
 
 
 def load_config_from_file(config_path: str) -> dict:

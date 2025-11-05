@@ -1,3 +1,4 @@
+import gc
 from vllm.sampling_params import SamplingParams
 from vllm import LLM
 from cs336_alignment.math_baseline import (
@@ -53,27 +54,30 @@ if __name__ == "__main__":
     from rich import print
     from cs336_alignment.sft_helper import tokenize_to_tensor
     from cs336_alignment.sft import train_sft
-    from cs336_alignment.config import SftConfig
+    from cs336_alignment.config import SftConfig, ExpertIterConfig
 
-    model_id = "Qwen/Qwen2.5-Math-1.5B"
-    question_batch_size = 512
-    vllm_batch_size = 64
-    sample_batch_size = 8
-    n_ei_steps = 5
-    output_model = "expert_iter"
     sft_config = SftConfig()
+    expert_iter_config = ExpertIterConfig()
 
-    prompts, ground_truths = get_evaluation_samples(1024, 0)
+    model_id = sft_config.model_id
+    question_batch_size = expert_iter_config.question_batch_size
+    vllm_batch_size = expert_iter_config.vllm_batch_size
+    sample_batch_size = expert_iter_config.sample_batch_size
+    n_ei_steps = expert_iter_config.n_ei_steps
+    output_model = expert_iter_config.output_model_dir
+
+    prompts, ground_truths = get_evaluation_samples(sft_config.max_examples, 0)
     sampling_params = get_evaluation_sample_params(sample_batch_size)
     tokenizer = AutoTokenizer.from_pretrained(f"models/{model_id}")
 
+    gpus_count = torch.cuda.device_count()
+    vllm_device = "cuda:0" if gpus_count == 1 else "cuda:1"
     vllm = init_vllm(
         model_id=f"models/{model_id}",
-        device="cuda:1",
+        device=vllm_device,
         seed=42,
         gpu_memory_utilization=0.85,
     )
-    indices = np.array(range(len(prompts)))
 
     train_device = "cuda:0"
     llm = AutoModelForCausalLM.from_pretrained(
@@ -84,6 +88,10 @@ if __name__ == "__main__":
     )
     llm.train()  # set model to training mode
 
+    indices = np.array(range(len(prompts)))
+    is_sample_device = vllm_device == train_device
+    output_dir = f"models/{output_model}"
+    os.makedirs(output_dir, exist_ok=True)
     for _ in range(n_ei_steps):
         np.random.shuffle(indices)
         batch_indices = indices[:question_batch_size]
@@ -95,11 +103,12 @@ if __name__ == "__main__":
         if vllm is None:
             print("Initializing vLLM model for EI step...")
             vllm = init_vllm(
-                model_id=f"models/{output_model}",
-                device="cuda:0",
+                model_id=f"models/{model_id}",
+                device=vllm_device,
                 seed=42,
                 gpu_memory_utilization=0.85,
             )
+            load_policy_into_vllm_instance(llm, vllm)
 
         sft_prompts = []
         sft_responses = []
@@ -119,9 +128,12 @@ if __name__ == "__main__":
                 sub_batch_ground_truths,
             )
         print(f"Number of positive samples collected: {len(sft_prompts)}")
-        if vllm is not None:
+
+        # Free up vLLM memory if on the same device
+        if is_sample_device:
             del vllm
             vllm = None
+            gc.collect()
 
         tokenized_data = tokenize_to_tensor(sft_prompts, sft_responses, tokenizer)
         input_ids = tokenized_data["input_ids"]
@@ -133,14 +145,10 @@ if __name__ == "__main__":
             train_device,
             llm=llm,
             input_ids=input_ids,
-            labels =labels,
+            labels=labels,
             resp_mask=response_mask,
         )
-
-        break
     
-    output_dir = f"models/{output_model}"
-    os.makedirs(output_dir, exist_ok=True)
     llm.save_pretrained(save_directory=output_dir)  # type: ignore
     tokenizer.save_pretrained(save_directory=output_dir)
     cleanup()
