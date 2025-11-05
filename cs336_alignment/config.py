@@ -18,7 +18,6 @@ class SftConfig(BaseModel):
 
 class ExpertIterConfig(BaseModel):
     question_batch_size: int = 512
-    vllm_batch_size: int = 64
     sample_batch_size: int = 8
     n_ei_steps: int = 5
     output_model_dir: str = "expert_iter"

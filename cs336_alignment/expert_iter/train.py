@@ -54,14 +54,48 @@ if __name__ == "__main__":
     from rich import print
     from cs336_alignment.sft_helper import tokenize_to_tensor
     from cs336_alignment.sft import train_sft
-    from cs336_alignment.config import SftConfig, ExpertIterConfig
+    from cs336_alignment.config import SftConfig, ExpertIterConfig, load_config_from_file
+    from cs336_alignment.logger import setup_logging, print_and_log
+    import random
+    import argparse
 
-    sft_config = SftConfig()
-    expert_iter_config = ExpertIterConfig()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "-c", "--config", type=str, required=False, help="Path to config file"
+    )
+    parser.add_argument(
+        "-t", "--test", action="store_true", help="Run in test mode"
+    )
+    args = parser.parse_args()
+    config = load_config_from_file(args.config)
+    config_name = os.path.splitext(os.path.basename(args.config))[0]
+    setup_logging(log_file_name=f"{config_name}.log")
+    print_and_log("Starting SFT training...")
+    print_and_log(f"Arguments: {args}")
+    sft_config = SftConfig(**config.get("SftConfig", {}))
+    expert_iter_config = ExpertIterConfig(**config.get("ExpertIterConfig", {}))
+    print_and_log(f"SFT Config: {sft_config}")
+    print_and_log(f"Expert Iter Config: {expert_iter_config}")
+
+    seed = args.seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
     model_id = sft_config.model_id
     question_batch_size = expert_iter_config.question_batch_size
-    vllm_batch_size = expert_iter_config.vllm_batch_size
+    vllm_batch_size = 64
+
+    gpu_memory = torch.cuda.get_device_properties(0).total_memory // (1024**3)
+    if gpu_memory >= 64:
+        vllm_batch_size = int(64 / 8 * vllm_batch_size)
+    elif gpu_memory >= 32:
+        vllm_batch_size = int(32 / 8 * vllm_batch_size)
+    elif gpu_memory >= 16:
+        vllm_batch_size = int(16 / 8 * vllm_batch_size)
+    print_and_log(f"Using vLLM batch size: {vllm_batch_size}")
+
     sample_batch_size = expert_iter_config.sample_batch_size
     n_ei_steps = expert_iter_config.n_ei_steps
     output_model = expert_iter_config.output_model_dir
@@ -72,22 +106,9 @@ if __name__ == "__main__":
 
     gpus_count = torch.cuda.device_count()
     vllm_device = "cuda:0" if gpus_count == 1 else "cuda:1"
-    vllm = init_vllm(
-        model_id=f"models/{model_id}",
-        device=vllm_device,
-        seed=42,
-        gpu_memory_utilization=0.85,
-    )
-
+    vllm = None
     train_device = "cuda:0"
-    llm = AutoModelForCausalLM.from_pretrained(
-        f"models/{sft_config.model_id}",
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        device_map={"": train_device},
-    )
-    llm.train()  # set model to training mode
-
+    llm: PreTrainedModel | None = None
     indices = np.array(range(len(prompts)))
     is_sample_device = vllm_device == train_device
     output_dir = f"models/{output_model}"
@@ -140,6 +161,19 @@ if __name__ == "__main__":
         response_mask = tokenized_data["response_mask"]
         labels = tokenized_data["labels"] 
 
+        if args.test:
+            break
+
+        if llm is None:
+            llm = AutoModelForCausalLM.from_pretrained(
+                f"models/{sft_config.model_id}",
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                device_map={"": train_device},
+            )
+            llm.train()  # set model to training mode
+
+        print_and_log("Starting SFT training step...")
         train_sft(
             sft_config,
             train_device,
