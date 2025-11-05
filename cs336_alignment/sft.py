@@ -61,6 +61,8 @@ if __name__ == "__main__":
     print_and_log("Starting SFT training...")
     print_and_log(f"Arguments: {args}")
     sft_config = SftConfig(**config)
+    if args.model_id:
+        sft_config.model_id = args.model_id
     print_and_log(f"SFT Config: {sft_config}")
 
     seed = args.seed
