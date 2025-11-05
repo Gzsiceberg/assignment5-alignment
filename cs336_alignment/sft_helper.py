@@ -259,24 +259,29 @@ Assistant: <think>"""
     prompts: list[str] = []
     responses: list[str] = []
     unique_queries: dict[str, int] = {}
+    query_to_index: dict[str, tuple[int, int]] = {}
     is_all: bool = limit <= 0
     for data in tqdm(ds, total=len(ds), desc="Extracting prompts and responses"):
         question: str = data["query"]  # type: ignore
         q_key = question.lower().strip()
+        resp: str = data["response"]  # type: ignore
         if q_key in unique_queries:
             unique_queries[q_key] += 1
+            (index, resp_length) = query_to_index[q_key]
+            if len(resp) < resp_length:
+                # Update to a shorter response
+                query_to_index[q_key] = (index, len(resp))
+                responses[index] = f"{resp} </think> <answer> {extract_ans(resp, False)} </answer>"
             continue
         else:
             unique_queries[q_key] = 1
             if len(unique_queries) <= offset and not is_all:
                 continue
-        resp: str = data["response"]  # type: ignore
-        answer = extract_ans(resp, False)
-        assert answer is not None, f"Failed to extract answer from response: {resp}"
-        prompts.append(prompt_templ.format(question))
-        responses.append(f"{resp} </think> <answer> {answer} </answer>")
         if len(prompts) >= limit and not is_all:
             break
+        prompts.append(prompt_templ.format(question))
+        query_to_index[q_key] = (len(responses), len(resp))
+        responses.append(f"{resp} </think> <answer> {extract_ans(resp, False)} </answer>")
     print(f"Total unique prompts: {len(prompts)}")
     import numpy as np
     list_occurrences = np.array(list(unique_queries.values()))
