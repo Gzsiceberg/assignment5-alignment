@@ -76,6 +76,7 @@ if __name__ == "__main__":
     # warning: flash-attn currently only supports certain CUDA and PyTorch versions.
     # uv add flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.4.11/flash_attn-2.8.3%2Bcu128torch2.5-cp312-cp312-linux_x86_64.whl" }
     print_and_log("Loading model and tokenizer...")
+    is_eval_only = args.eval
     train_device = "cuda:0"
     llm = AutoModelForCausalLM.from_pretrained(
         f"models/{sft_config.model_id}",
@@ -83,7 +84,10 @@ if __name__ == "__main__":
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
-    llm.train()  # set model to training mode
+    if is_eval_only:
+        llm.eval()  # set model to evaluation mode
+    else:
+        llm.train()  # set model to training mode
 
     output_dir = f"models/sft_model_{config_name}"
     os.makedirs(output_dir, exist_ok=True)
@@ -123,7 +127,6 @@ if __name__ == "__main__":
     prompts = []
     ground_truths = []
     sampling_params: SamplingParams = get_evaluation_sample_params()
-    is_eval_only = args.eval
     if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
         prompts, ground_truths = get_evaluation_samples(256, 1024)
 
