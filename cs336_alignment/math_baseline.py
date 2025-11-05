@@ -28,12 +28,14 @@ class EvalEntry:
 
 def evaluate_vllm(
     vllm_model: LLM,
-    reward_fn: Callable[[str, Any], dict[str, float]],
     prompts: List[str],
     ground_truths: List[str],
     eval_sampling_params: SamplingParams,
+    reward_fn: Callable[[str, Any], dict[str, float]] | None = None,
     dump_data: bool = True,
 ) -> None:
+    if reward_fn is None:
+        reward_fn = lambda resp, gt: r1_zero_reward_fn(resp, gt, False)
     batch_size = 32
     # get gpu memory maximum
     gpu_memory_max = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)  # in GB
@@ -110,6 +112,8 @@ def get_evaluation_sample_params() -> SamplingParams:
 if __name__ == "__main__":
     import argparse
     import torch
+    import numpy as np
+    import random
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--seed", type=int, default=42, help="Random seed for evaluation.")
@@ -123,6 +127,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.makedirs("data", exist_ok=True)
 
+    seed = args.seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     gpu_count = torch.cuda.device_count()
     print(f"gpu count: {gpu_count}")
     assert gpu_count >= 1, "At least one GPU is required."
@@ -131,14 +140,13 @@ if __name__ == "__main__":
     sampling_params = get_evaluation_sample_params()
 
     from vllm.model_executor import set_random_seed as vllm_set_random_seed
-    vllm_set_random_seed(args.seed)
+    vllm_set_random_seed(seed)
     model = LLM(model=f"models/{args.model_id}", 
                 dtype=torch.bfloat16, # type: ignore
                 enable_prefix_caching=True,
                 gpu_memory_utilization=0.85)
     evaluate_vllm(
         vllm_model=model,
-        reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
         prompts=prompts,
         ground_truths=ground_truths,
         eval_sampling_params=sampling_params,

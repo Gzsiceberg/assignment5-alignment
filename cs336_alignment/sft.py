@@ -1,50 +1,10 @@
 import logging
-from vllm.model_executor import set_random_seed as vllm_set_random_seed
-from vllm import LLM
 from vllm.sampling_params import SamplingParams
-from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel # type: ignore
-from unittest.mock import patch
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  # type: ignore
 import torch
 import numpy as np
 from einops import rearrange, einsum
-
-
-
-def init_vllm(
-    model_id: str, device: str, seed: int, gpu_memory_utilization: float = 0.85
-):
-    """
-    Start the inference process, here we use vLLM to hold a model on a GPU separate from the policy.
-    """
-    vllm_set_random_seed(seed)
-    # Monkeypatch from TRL:
-    # https://github.com/huggingface/trl/blob/22759c820867c8659d00082ba8cf004e963873c1/trl/trainer/grpo_trainer.py
-    # Patch vLLM to make sure we can
-    # (1) place the vLLM model on the desired device (world_size_patch) and
-    # (2) avoid a test that is not designed for our setting (profiling_patch).
-    world_size_patch = patch("torch.distributed.get_world_size", return_value=1)
-    profiling_patch = patch(
-        "vllm.worker.worker.Worker._assert_memory_footprint_increased_during_profiling",
-        return_value=None,
-    )
-    with world_size_patch, profiling_patch:
-        return LLM(
-            model=model_id,
-            device=device,
-            dtype=torch.bfloat16, # type: ignore
-            enable_prefix_caching=True,
-            gpu_memory_utilization=gpu_memory_utilization,
-        )
-
-
-def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
-    """
-    Copied from https://github.com/huggingface/trl/blob/
-    22759c820867c8659d00082ba8cf004e963873c1/trl/trainer/grpo_trainer.py#L670.
-    """
-    state_dict = policy.state_dict()
-    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model # type: ignore
-    llm_model.load_weights(state_dict.items())
+from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 
 
 def get_batch(
@@ -90,9 +50,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--config", type=str, required=False, help="Path to config file"
     )
-    parser.add_argument(
-        "-e", "--eval", action="store_true", help="Run evaluation only"
-    )
+    parser.add_argument("-e", "--eval", action="store_true", help="Run evaluation only")
     parser.add_argument(
         "-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID"
     )
@@ -123,7 +81,7 @@ if __name__ == "__main__":
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
-    llm.train() # set model to training mode
+    llm.train()  # set model to training mode
 
     output_dir = f"models/sft_model_{config_name}"
     os.makedirs(output_dir, exist_ok=True)
@@ -142,18 +100,30 @@ if __name__ == "__main__":
     example_count = input_ids.shape[0]
     batch_size = sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
     training_steps = sft_config.num_epochs * example_count // batch_size
-    print(f"Total training steps: {training_steps} batch size: {batch_size} example count: {example_count}")
-    eval_interval = sft_config.eval_interval * example_count // batch_size if sft_config.eval_interval > 0 else 0
+    print(
+        f"Total training steps: {training_steps} batch size: {batch_size} example count: {example_count}"
+    )
+    eval_interval = (
+        sft_config.eval_interval * example_count // batch_size
+        if sft_config.eval_interval > 0
+        else 0
+    )
     print_and_log(f"Evaluation interval (in steps): {eval_interval}")
 
     from vllm.sampling_params import SamplingParams
-    from cs336_alignment.math_baseline import evaluate_vllm, get_evaluation_sample_params, get_evaluation_samples
+    from cs336_alignment.math_baseline import (
+        evaluate_vllm,
+        get_evaluation_sample_params,
+        get_evaluation_samples,
+    )
+
     vllm_model = None
     prompts = []
     ground_truths = []
     sampling_params: SamplingParams = get_evaluation_sample_params()
 
     from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+
     if sft_config.eval_interval > 0 and torch.cuda.device_count() > 1:
         prompts, ground_truths = get_evaluation_samples(256, 1024)
 
@@ -169,11 +139,10 @@ if __name__ == "__main__":
 
         evaluate_vllm(
             vllm_model=vllm_model,
-            reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
             prompts=prompts,
             ground_truths=ground_truths,
             eval_sampling_params=sampling_params,
-            dump_data=False
+            dump_data=False,
         )
 
     if args.eval:
@@ -183,7 +152,7 @@ if __name__ == "__main__":
     from sft_helper import get_response_log_probs, sft_microbatch_train_step
     import time
     from tqdm import tqdm, trange
-    from transformers import get_cosine_schedule_with_warmup # type: ignore
+    from transformers import get_cosine_schedule_with_warmup  # type: ignore
 
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate)
@@ -199,22 +168,26 @@ if __name__ == "__main__":
     warmup_steps = int(0.02 * training_steps)
 
     lr_scheduler = get_cosine_schedule_with_warmup(
-        optimizer,
-        warmup_steps,
-        training_steps
+        optimizer, warmup_steps, training_steps
     )
 
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
         total_loss = torch.tensor(0.0, device=train_device)
-        for _ in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
+        for _ in trange(
+            gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False
+        ):
             random_index = np.random.randint(0, sample_count, size=batch_size)
-            batch_input_ids, batch_labels, batch_resp_mask = input_ids[random_index], labels[random_index], resp_mask[random_index]
+            batch_input_ids, batch_labels, batch_resp_mask = (
+                input_ids[random_index],
+                labels[random_index],
+                resp_mask[random_index],
+            )
             assert batch_input_ids.shape == (batch_size, sample_content_length)
             assert batch_labels.shape == (batch_size, sample_content_length)
             assert batch_resp_mask.shape == (batch_size, sample_content_length)
             with amp_ctx:
                 results = get_response_log_probs(
-                    llm, batch_input_ids, batch_labels, return_token_entropy=False # type: ignore
+                    llm, batch_input_ids, batch_labels, return_token_entropy=False  # type: ignore
                 )
                 log_probs = results["log_probs"]
                 assert log_probs.shape == (batch_size, sample_content_length)
@@ -228,24 +201,24 @@ if __name__ == "__main__":
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
-        print(f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f}")
-        pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}") # type: ignore
+        print(
+            f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f}"
+        )
+        pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}")  # type: ignore
 
         is_last_step = st == training_steps - 1
         if vllm_model is not None and ((st + 1) % eval_interval == 0 or is_last_step):
             print_and_log(f"Running evaluation at step {st+1}...")
-            load_policy_into_vllm_instance(llm, vllm_model) # # type: ignore
+            load_policy_into_vllm_instance(llm, vllm_model)  # # type: ignore
             evaluate_vllm(
                 vllm_model=vllm_model,
-                reward_fn=lambda resp, gt: r1_zero_reward_fn(resp, gt, False),
                 prompts=prompts,
                 ground_truths=ground_truths,
                 eval_sampling_params=sampling_params,
-                dump_data=False
+                dump_data=False,
             )
 
-    
-    llm.save_pretrained(save_directory=output_dir) # type: ignore
+    llm.save_pretrained(save_directory=output_dir)  # type: ignore
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
     tokenizer.save_pretrained(save_directory=output_dir)
 
