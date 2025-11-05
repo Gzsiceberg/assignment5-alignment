@@ -80,6 +80,7 @@ def evaluate_vllm(
     avg_reward = total_rewards / total_entries if total_entries > 0 else 0.0
     avg_reward_v2 = total_rewards_v2 / total_entries if total_entries > 0 else 0.0
     avg_formatting_reward = total_formatting_rewards / total_entries if total_entries > 0 else 0.0
+    print("===== Evaluation Results =====")
     print(f"Average Reward over {total_entries} samples: {avg_reward:.4f}")
     print(f"Average Reward v2 over {total_entries} samples: {avg_reward_v2:.4f}")
     print(f"Average Formatting Reward over {total_entries} samples: {avg_formatting_reward:.4f}")
