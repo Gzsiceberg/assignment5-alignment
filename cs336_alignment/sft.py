@@ -124,10 +124,6 @@ if __name__ == "__main__":
         device_map={"": train_device},
     )
     llm.train() # set model to training mode
-    tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
-
-    context_length = llm.config.max_position_embeddings
-    print_and_log(f"Model context length: {context_length}")
 
     output_dir = f"models/sft_model_{config_name}"
     os.makedirs(output_dir, exist_ok=True)
@@ -142,7 +138,6 @@ if __name__ == "__main__":
     labels = torch.from_numpy(labels).to(train_device)
     print_and_log(f"Input IDs shape: {input_ids.shape}")
     assert input_ids.shape == labels.shape == resp_mask.shape
-    assert input_ids.shape[1] <= context_length, f"Input sequence length exceeds context length."
 
     example_count = input_ids.shape[0]
     batch_size = sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
@@ -251,6 +246,7 @@ if __name__ == "__main__":
 
     
     llm.save_pretrained(save_directory=output_dir) # type: ignore
+    tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
     tokenizer.save_pretrained(save_directory=output_dir)
 
     end_time = time.time()
