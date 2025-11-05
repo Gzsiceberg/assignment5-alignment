@@ -10,6 +10,7 @@ import os
 from rich import print
 from dataclasses import dataclass
 import torch
+from cs336_alignment.extract import extract_prompt_and_response
 
 
 
@@ -89,50 +90,6 @@ def evaluate_vllm(
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
 
-def generate_prompt_and_gt(ds: datasets.Dataset, limit: int, offset: int) -> tuple[List[str], List[str]]:
-    from rich import print
-    print(f"Generating prompts and ground truths with limit={limit} and offset={offset}")
-    prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
-User: {0}
-Assistant: <think>"""
-    prompts: List[str] = []
-    responses: List[str] = []
-    unique_queries: dict[str, int] = {}
-    offset_queries: set[str] = set()
-    query_to_index: dict[str, tuple[int, int]] = {}
-
-    for data in tqdm(ds, desc="Generating prompts and ground truths", total=len(ds), leave=False):
-        question: str = data["query"] # type: ignore
-        q_key = question.lower().strip()
-        answer_text: str = data["response"] # type: ignore
-        if q_key in unique_queries:
-            unique_queries[q_key] += 1
-            if q_key in offset_queries:
-                continue
-            (index, resp_length) = query_to_index[q_key]
-            if len(answer_text) < resp_length:
-                # Update to a shorter response
-                responses[index] = answer_text
-                query_to_index[q_key] = (index, len(answer_text))
-            continue
-        else:
-            unique_queries[q_key] = 1
-            if len(offset_queries) < offset:
-                offset_queries.add(q_key)
-            if q_key in offset_queries:
-                continue
-        full_prompt = prompt_templ.format(question)
-        prompts.append(full_prompt)
-        query_to_index[q_key] = (len(prompts) - 1, len(answer_text))
-        responses.append(answer_text)
-        if len(prompts) >= limit:
-            break
-    min_response_length = min([len(resp) for resp in responses])
-    max_response_length = max([len(resp) for resp in responses])
-    print(f"Generated {len(prompts)} unique prompts.")
-    print(f"Response length - min: {min_response_length}, max: {max_response_length}")
-    return prompts, responses
-
 
 if __name__ == "__main__":
     import argparse
@@ -156,7 +113,7 @@ if __name__ == "__main__":
     print(f"gpu count: {gpu_count}")
     assert gpu_count >= 1, "At least one GPU is required."
 
-    prompts, ground_truths = generate_prompt_and_gt(train, args.limit, args.offset)
+    prompts, ground_truths = extract_prompt_and_response(train, args.limit, args.offset)
     sampling_params = SamplingParams(
         temperature=1.0, top_p=1.0, max_tokens=4096, stop=["\n"]
     )

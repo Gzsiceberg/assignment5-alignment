@@ -1,4 +1,7 @@
 import regex as re
+from tqdm import tqdm
+import datasets
+from typing import List, Any
 
 
 GSM_RE = re.compile(r"#### (\-?[0-9\.\,]+)")
@@ -87,6 +90,7 @@ def norm_str2bool(s: str) -> bool | None:
     else:
         return None
 
+
 def extract_explicit_ans(resp_str: str) -> str | None:
     resp_str = clean_trailing(resp_str)
     # might be answer only
@@ -149,3 +153,78 @@ def extract_ans(resp_str: str, strict_extract: bool) -> str:
         if len(matches) > 0:
             return matches[-1]
     return ""  # Empty str if no answer is found
+
+
+def extract_prompt_and_response(
+    ds: datasets.Dataset, limit: int, offset: int
+) -> tuple[List[str], List[str]]:
+    from rich import print
+
+    print(
+        f"Generating prompts and ground truths with limit={limit} and offset={offset}"
+    )
+    prompt_templ = """A conversation between User and Assistant. The User asks a question, and the Assistant solves it. The Assistant first thinks about the reasoning process in the mind and then provides the User with the answer. The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
+User: {0}
+Assistant: <think>"""
+    prompts: List[str] = []
+    responses: List[str] = []
+    unique_queries: dict[str, int] = {}
+    skip_queries: set[str] = set()
+    query_to_index: dict[str, tuple[int, int]] = {}
+
+    for data in tqdm(
+        ds, desc="Generating prompts and ground truths", total=len(ds), leave=False
+    ):
+        question: str = data["query"]  # type: ignore
+        q_key = question.lower().strip()
+        resp: str = data["response"]  # type: ignore
+        if q_key in unique_queries:
+            unique_queries[q_key] += 1
+            if q_key in skip_queries:
+                continue
+            (index, resp_length) = query_to_index[q_key]
+            if len(resp) < resp_length:
+                # Update to a shorter response
+                query_to_index[q_key] = (index, len(resp))
+                responses[index] = resp
+            continue
+        else:
+            unique_queries[q_key] = 1
+            if len(skip_queries) < offset:
+                skip_queries.add(q_key)
+            if q_key in skip_queries:
+                continue
+        if len(prompts) >= limit:
+            skip_queries.add(q_key)
+            continue
+        full_prompt = prompt_templ.format(question)
+        prompts.append(full_prompt)
+        query_to_index[q_key] = (len(prompts) - 1, len(resp))
+        responses.append(resp)
+    min_response_length = min([len(resp) for resp in responses])
+    max_response_length = max([len(resp) for resp in responses])
+    print(f"Generated {len(prompts)} unique prompts.")
+    print(f"Response length - min: {min_response_length}, max: {max_response_length}")
+
+    import numpy as np
+
+    list_occurrences = np.array(list(unique_queries.values()))
+    mean_occurrence = list_occurrences.mean()
+    max_occurrence = list_occurrences.max()
+    min_occurrence = list_occurrences.min()
+    std_occurrence = list_occurrences.std()
+    print(f"offset queries: {len(skip_queries)}")
+    print(
+        f"Mean occurrence: {mean_occurrence:.2f}, Max occurrence: {max_occurrence}, Min occurrence: {min_occurrence}, Std occurrence: {std_occurrence:.2f}"
+    )
+    return prompts, responses
+
+
+def extract_prompt_and_response_with_format(
+    ds: datasets.Dataset, limit: int, offset: int
+) -> tuple[list[str], list[str]]:
+    prompts, responses = extract_prompt_and_response(ds, limit, offset)
+    for t, resp in enumerate(responses):
+        ans = extract_ans(resp, False)
+        responses[t] = f"{resp} </think> <answer> {ans} </answer>"
+    return prompts, responses
