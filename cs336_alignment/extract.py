@@ -155,6 +155,13 @@ def extract_ans(resp_str: str, strict_extract: bool) -> str:
     return ""  # Empty str if no answer is found
 
 
+def preprocess_text(text: str) -> str:
+    text = text.replace("\n", " ").strip()
+    text = re.sub(r"([.\!\?,'/()])", r"\1", text)
+    text = text.lower()
+    return text
+
+
 def extract_prompt_and_response(
     ds: datasets.Dataset, limit: int, offset: int
 ) -> tuple[List[str], List[str]]:
@@ -176,7 +183,7 @@ Assistant: <think>"""
         ds, desc="Generating prompts and ground truths", total=len(ds), leave=False
     ):
         question: str = data["query"]  # type: ignore
-        q_key = question.lower().strip()
+        q_key = preprocess_text(question)
         resp: str = data["response"]  # type: ignore
         if q_key in unique_queries:
             unique_queries[q_key] += 1
@@ -190,13 +197,10 @@ Assistant: <think>"""
             continue
         else:
             unique_queries[q_key] = 1
-            if len(skip_queries) < offset:
+            if len(skip_queries) < offset or len(prompts) >= limit:
                 skip_queries.add(q_key)
             if q_key in skip_queries:
                 continue
-        if len(prompts) >= limit:
-            skip_queries.add(q_key)
-            continue
         full_prompt = prompt_templ.format(question)
         prompts.append(full_prompt)
         query_to_index[q_key] = (len(prompts) - 1, len(resp))

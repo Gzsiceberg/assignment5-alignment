@@ -137,7 +137,7 @@ if __name__ == "__main__":
     ground_truths = []
     sampling_params: SamplingParams = get_evaluation_sample_params()
     if sft_config.eval_interval > 0 and (torch.cuda.device_count() > 1 or is_eval_only):
-        prompts, ground_truths = get_evaluation_samples(256, 1024)
+        prompts, ground_truths = get_evaluation_samples(256, 4096)
 
         print_and_log("Initializing vLLM model for evaluation...")
         vllm_model = init_vllm(

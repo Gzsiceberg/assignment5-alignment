@@ -121,7 +121,7 @@ if __name__ == "__main__":
         "--limit", type=int, default=512, help="Number of samples to evaluate on."
     )
     parser.add_argument(
-        "--offset", type=int, default=1024, help="Offset for selecting samples."
+        "--offset", type=int, default=4096, help="Offset for selecting samples."
     )
     parser.add_argument("-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID to evaluate.")
     args = parser.parse_args()

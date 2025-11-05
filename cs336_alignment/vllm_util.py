@@ -57,7 +57,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--limit", type=int, default=256)
-    parser.add_argument("--offset", type=int, default=1024)
+    parser.add_argument("--offset", type=int, default=4096)
     parser.add_argument(
         "-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID"
     )
