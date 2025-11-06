@@ -20,6 +20,7 @@ class ExpertIterConfig(BaseModel):
     question_batch_size: int = 512
     sample_batch_size: int = 8
     n_ei_steps: int = 5
+    use_all_positive: bool = False
 
 
 def load_config_from_file(config_path: str) -> dict:

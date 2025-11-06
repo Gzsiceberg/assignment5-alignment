@@ -39,6 +39,7 @@ def expert_iter_gen(
     sft_responses: list[str],
     sub_batch_prompts: list[str],
     sub_batch_ground_truths: list[str],
+    use_all_positive: bool = False,
 ):
     from cs336_alignment.extract import extract_ans
     from cs336_alignment.logger import print_and_log
@@ -58,12 +59,19 @@ def expert_iter_gen(
             reward_dict = r1_zero_reward_fn(resp_text, ground_truth)
             if reward_dict["reward"] <= 0:
                 continue
+
+            if use_all_positive:
+                ans = extract_ans(ground_truth, False)
+                sft_prompts.append(prompt)
+                sft_responses.append(f"{resp_text} </think> <answer> {ans} </answer>")
+                continue
+
             resp_len = len(resp_text)
             if resp_len < min_len:
                 min_len = resp_len
                 min_len_resp = resp_text
 
-        if min_len_resp != "":
+        if not use_all_positive and min_len_resp != "":
             resp = min_len_resp
             ans = extract_ans(ground_truth, False)
             sft_prompts.append(prompt)
