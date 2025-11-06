@@ -16,6 +16,11 @@ from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 from cs336_alignment.config import load_config_from_file, SftConfig
 from cs336_alignment.logger import setup_logging, print_and_log
 from cs336_alignment.sft_helper import masked_normalize, get_response_log_probs, sft_microbatch_train_step
+from cs336_alignment.math_baseline import (
+    evaluate_vllm,
+    get_evaluation_sample_params,
+    get_evaluation_samples,
+)
 
 
 def get_batch(
@@ -238,13 +243,6 @@ if __name__ == "__main__":
     labels = torch.from_numpy(labels).to(train_device)
     print_and_log(f"Input IDs shape: {input_ids.shape}")
     assert input_ids.shape == labels.shape == resp_mask.shape
-
-    from vllm.sampling_params import SamplingParams
-    from cs336_alignment.math_baseline import (
-        evaluate_vllm,
-        get_evaluation_sample_params,
-        get_evaluation_samples,
-    )
 
     eval_function = None
     if sft_config.eval_interval > 0 and (torch.cuda.device_count() > 1 or is_eval_only):

@@ -1,5 +1,4 @@
 import os
-from typing import Callable
 os.environ["VLLM_LOGGING_LEVEL"] = "ERROR"
 import gc
 from vllm.sampling_params import SamplingParams
