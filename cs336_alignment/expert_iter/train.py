@@ -41,7 +41,6 @@ def expert_iter_gen(
     sub_batch_ground_truths: list[str],
     use_all_positive: bool = False,
 ) -> int:
-    from cs336_alignment.extract import extract_ans
     from cs336_alignment.logger import print_and_log
     outputs = vllm.generate(sub_batch_prompts, sampling_params=sampling_params)
     correct_count = 0
@@ -64,9 +63,8 @@ def expert_iter_gen(
 
             has_correct = True
             if use_all_positive:
-                ans = extract_ans(ground_truth, False)
                 sft_prompts.append(prompt)
-                sft_responses.append(f"{resp_text} </think> <answer> {ans} </answer>")
+                sft_responses.append(resp_text)
                 continue
 
             resp_len = len(resp_text)
@@ -78,11 +76,11 @@ def expert_iter_gen(
 
         if not use_all_positive and min_len_resp != "":
             resp = min_len_resp
-            ans = extract_ans(ground_truth, False)
             sft_prompts.append(prompt)
-            sft_responses.append(f"{resp} </think> <answer> {ans} </answer>")
+            sft_responses.append(resp)
     
     if correct_count == 0:
+        from cs336_alignment.extract import extract_ans
         print_and_log("Warning: No positive samples collected in this batch.")
         for i in range(4):
             prompt = sub_batch_prompts[i]
