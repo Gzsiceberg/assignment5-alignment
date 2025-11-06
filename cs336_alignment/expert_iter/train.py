@@ -201,6 +201,7 @@ if __name__ == "__main__":
             input_ids=input_ids,
             labels=labels,
             resp_mask=response_mask,
+            print_entropy=True,
         )
     
     if llm is not None:
