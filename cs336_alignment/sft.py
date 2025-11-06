@@ -167,7 +167,7 @@ def train_sft(
         total_loss = total_loss / gradient_accumulation_steps
         total_entropy = total_entropy / gradient_accumulation_steps
         print_and_log(
-            f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f} - AvgEntropy: {total_entropy.item():.4f}"
+            f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f} - Entropy: {total_entropy.item():.4f}"
         )
         pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}")  # type: ignore
 
