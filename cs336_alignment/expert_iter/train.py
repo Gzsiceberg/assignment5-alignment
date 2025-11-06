@@ -40,10 +40,11 @@ def expert_iter_gen(
     sub_batch_prompts: list[str],
     sub_batch_ground_truths: list[str],
     use_all_positive: bool = False,
-):
+) -> int:
     from cs336_alignment.extract import extract_ans
     from cs336_alignment.logger import print_and_log
     outputs = vllm.generate(sub_batch_prompts, sampling_params=sampling_params)
+    correct_count = 0
     for output, ground_truth, prompt in tqdm(
         zip(outputs, sub_batch_ground_truths, sub_batch_prompts),
         total=len(sub_batch_prompts),
@@ -54,12 +55,14 @@ def expert_iter_gen(
 
         min_len_resp: str = ""
         min_len = float("inf")
+        has_correct = False
         for resp in output.outputs:
             resp_text = resp.text
             reward_dict = r1_zero_reward_fn(resp_text, ground_truth)
             if reward_dict["reward"] <= 0:
                 continue
 
+            has_correct = True
             if use_all_positive:
                 ans = extract_ans(ground_truth, False)
                 sft_prompts.append(prompt)
@@ -70,6 +73,8 @@ def expert_iter_gen(
             if resp_len < min_len:
                 min_len = resp_len
                 min_len_resp = resp_text
+        if has_correct:
+            correct_count += 1
 
         if not use_all_positive and min_len_resp != "":
             resp = min_len_resp
@@ -77,7 +82,7 @@ def expert_iter_gen(
             sft_prompts.append(prompt)
             sft_responses.append(f"{resp} </think> <answer> {ans} </answer>")
     
-    if len(sft_prompts) == 0:
+    if correct_count == 0:
         print_and_log("Warning: No positive samples collected in this batch.")
         for i in range(4):
             prompt = sub_batch_prompts[i]
@@ -85,6 +90,7 @@ def expert_iter_gen(
             sft_prompts.append(prompt)
             ans = extract_ans(ground_truth, False)
             sft_responses.append(f"{ground_truth} </think> <answer> {ans} </answer>")
+    return correct_count
 
 
 if __name__ == "__main__":
@@ -186,12 +192,13 @@ if __name__ == "__main__":
         sft_prompts = []
         sft_responses = []
 
+        correct_count = 0
         for i in trange(
             0, question_batch_size, vllm_batch_size, desc="Generating batches"
         ):
             sub_batch_prompts = batch_prompts[i : i + vllm_batch_size]
             sub_batch_ground_truths = batch_ground_truths[i : i + vllm_batch_size]
-            expert_iter_gen(
+            correct_count += expert_iter_gen(
                 sample_batch_size,
                 sampling_params,
                 vllm,
@@ -199,11 +206,11 @@ if __name__ == "__main__":
                 sft_responses,
                 sub_batch_prompts,
                 sub_batch_ground_truths,
+                use_all_positive=expert_iter_config.use_all_positive,
             )
         assert len(sft_prompts) > 0, "No positive samples collected in this EI step."
-        correct_count = len(sft_prompts)
-        accuracy = len(sft_prompts) / question_batch_size
-        print_and_log(f"Number of positive samples collected: {correct_count} accuracy={accuracy:.2f}")
+        accuracy = correct_count / question_batch_size
+        print_and_log(f"correct_count={correct_count} accuracy={accuracy:.2f} new_samples={len(sft_prompts)}")
 
         # Free up vLLM memory if on the same device
         if is_sample_device:
