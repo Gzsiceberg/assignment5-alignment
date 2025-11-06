@@ -72,7 +72,7 @@ def rollout(
         else:
             meta_info = question_meta_infos[question_id]
 
-        meta_info.sample_count = sample_batch_size
+        meta_info.sample_count = meta_info.sample_count // 2 + sample_batch_size
         meta_info.correct_count = meta_info.correct_count // 2
         min_len_resp: str = ""
         min_len = float("inf")
