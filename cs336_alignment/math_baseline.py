@@ -101,7 +101,7 @@ def get_evaluation_samples(limit: int, offset: int) -> tuple[List[str], List[str
     prompts, ground_truths = extract_prompt_and_response(train, limit, offset)
     return prompts, ground_truths
 
-def get_evaluation_sample_params(n: int = 1, max_tokens: int = 4096) -> SamplingParams:
+def get_evaluation_sample_params(n: int = 1, max_tokens: int = 2048) -> SamplingParams:
     sampling_params = SamplingParams(
         temperature=1.0, top_p=1.0, max_tokens=max_tokens, min_tokens=4, stop=["\n"], seed=42,
         n=n,
