@@ -90,6 +90,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t", "--test", action="store_true", help="Run in test mode"
     )
+    parser.add_argument(
+        "--resume_from", type=int, default=0, help="EI step to resume from"
+    )
     args = parser.parse_args()
     config = load_config_from_file(args.config)
     config_name = os.path.splitext(os.path.basename(args.config))[0]
@@ -141,7 +144,18 @@ if __name__ == "__main__":
     is_sample_device = vllm_device == train_device
     output_dir = f"models/{output_model}"
     os.makedirs(output_dir, exist_ok=True)
-    for ei_step in trange(n_ei_steps, desc="Expert Iteration Steps"):
+    if args.resume_from > 0:
+        n_ei_steps = n_ei_steps - args.resume_from
+        print_and_log(f"Resuming from EI step {args.resume_from}, remaining steps: {n_ei_steps}")
+        llm = AutoModelForCausalLM.from_pretrained(
+            f"models/{output_model}",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            device_map={"": train_device},
+        )
+        llm.train()  # type: ignore
+
+    for ei_step in trange(args.resume_from, n_ei_steps, desc="Expert Iteration Steps"):
         np.random.shuffle(indices)
         batch_indices = indices[:question_batch_size]
         batch_prompts = [prompts[j] for j in batch_indices]
@@ -217,10 +231,10 @@ if __name__ == "__main__":
             print_entropy=True,
         )
     
-    if llm is not None:
-        print_and_log(f"Saving fine-tuned model to {output_dir}...")
-        llm.save_pretrained(save_directory=output_dir)  # type: ignore
-        tokenizer.save_pretrained(save_directory=output_dir)
+        if llm is not None:
+            print_and_log(f"{ei_step}/{n_ei_steps} Saving fine-tuned model to {output_dir}...")
+            llm.save_pretrained(save_directory=output_dir)  # type: ignore
+            tokenizer.save_pretrained(save_directory=output_dir)
     
     if vllm is not None:
         vllm = init_vllm(
