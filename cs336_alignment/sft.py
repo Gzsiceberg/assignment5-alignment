@@ -62,13 +62,14 @@ def cleanup():
 
 
 def vllm_evaluate(
-    llm: PreTrainedModel,
+    llm: PreTrainedModel | None,
     vllm_model: LLM,
     prompts: list[str],
     ground_truths: list[str],
     sampling_params: SamplingParams,
 ):
-    load_policy_into_vllm_instance(llm, vllm_model)  # # type: ignore
+    if llm is not None:
+        load_policy_into_vllm_instance(llm, vllm_model)  # # type: ignore
     evaluate_vllm(
         vllm_model=vllm_model,
         prompts=prompts,
