@@ -5,7 +5,7 @@ SftConfig:
   micro_batch_size: 8
 
 ExpertIterConfig:
-  question_batch_size: 256
+  question_batch_size: 512
   sample_batch_size: 16
   n_ei_steps: 5
   use_all_positive: True
