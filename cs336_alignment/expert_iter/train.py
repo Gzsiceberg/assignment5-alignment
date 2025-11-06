@@ -43,7 +43,7 @@ class QuestionMetaInfo:
     def accuracy(self) -> float:
         if self.sample_count == 0:
             return 0.0
-        return self.correct_count / (self.sample_count + 8)
+        return self.correct_count / (self.sample_count + 2)
 
 
 def rollout(
