@@ -215,7 +215,7 @@ if __name__ == "__main__":
     sampling_params = get_evaluation_sample_params(sample_batch_size, 2048 - 512 - 256)
     tokenizer = AutoTokenizer.from_pretrained(f"models/{model_id}")
 
-    eval_sampling_params: SamplingParams = get_evaluation_sample_params()
+    eval_sampling_params: SamplingParams = get_evaluation_sample_params(1, 2048)
     eval_prompts, eval_ground_truths = get_evaluation_samples(256, 4096)
 
     gpus_count = torch.cuda.device_count()
