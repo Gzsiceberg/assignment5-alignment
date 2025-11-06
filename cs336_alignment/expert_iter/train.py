@@ -171,7 +171,8 @@ if __name__ == "__main__":
                 seed=42,
                 gpu_memory_utilization=0.85,
             )
-            vllm_evaluate(llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
+            if llm is not None:
+                vllm_evaluate(llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
             
 
         sft_prompts = []
