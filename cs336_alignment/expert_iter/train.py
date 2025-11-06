@@ -50,11 +50,21 @@ def expert_iter_gen(
         leave=False,
     ):
         assert len(output.outputs) == sample_batch_size
+
+        min_len_resp: str = ""
+        min_len = float("inf")
         for resp in output.outputs:
             resp_text = resp.text
             reward_dict = r1_zero_reward_fn(resp_text, ground_truth)
             if reward_dict["reward"] <= 0:
                 continue
+            resp_len = len(resp_text)
+            if resp_len < min_len:
+                min_len = resp_len
+                min_len_resp = resp_text
+
+        if min_len_resp != "":
+            resp = min_len_resp
             ans = extract_ans(ground_truth, False)
             sft_prompts.append(prompt)
             sft_responses.append(f"{resp} </think> <answer> {ans} </answer>")
