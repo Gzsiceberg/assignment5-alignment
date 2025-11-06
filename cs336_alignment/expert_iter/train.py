@@ -58,7 +58,7 @@ def rollout(
     use_all_positive: bool = False,
 ) -> int:
     outputs = vllm.generate(sub_prompts, sampling_params=sampling_params)
-    correct_count = 0
+    correct_question_count = 0
     for output, ground_truth, prompt, question_id in tqdm(
         zip(outputs, sub_ground_truths, sub_prompts, sub_question_ids),
         total=len(sub_prompts),
@@ -72,37 +72,38 @@ def rollout(
         else:
             meta_info = question_meta_infos[question_id]
 
-        meta_info.sample_count = meta_info.sample_count // 2 + sample_batch_size
-        meta_info.correct_count = meta_info.correct_count // 2
         min_len_resp: str = ""
         min_len = float("inf")
-        has_correct = False
+        correct_responses = []
         for resp in output.outputs:
             resp_text = resp.text
             reward_dict = r1_zero_reward_fn(resp_text, ground_truth)
             if reward_dict["reward"] <= 0:
                 continue
-
-            meta_info.correct_count += 1
-            has_correct = True
-            if use_all_positive:
-                sft_prompts.append(prompt)
-                sft_responses.append(resp_text)
-                continue
-
+            correct_responses.append(resp_text)
             resp_len = len(resp_text)
             if resp_len < min_len:
                 min_len = resp_len
                 min_len_resp = resp_text
-        if has_correct:
-            correct_count += 1
 
-        if not use_all_positive and min_len_resp != "":
+        if len(correct_responses) > 0:
+            correct_question_count += 1
+
+        meta_info.sample_count = meta_info.sample_count // 2 + sample_batch_size
+        meta_info.correct_count = meta_info.correct_count // 2 + len(correct_responses)
+
+        if use_all_positive:
+            if len(correct_responses) / sample_batch_size >= 0.9:
+                continue
+            for resp in correct_responses[:4]:  # limit to 4 samples per question
+                sft_prompts.append(prompt)
+                sft_responses.append(resp)
+        elif min_len_resp != "":
             resp = min_len_resp
             sft_prompts.append(prompt)
             sft_responses.append(resp)
 
-    if correct_count == 0:
+    if correct_question_count == 0:
         from cs336_alignment.extract import extract_ans
 
         print_and_log("Warning: No positive samples collected in this batch.")
@@ -112,7 +113,7 @@ def rollout(
             sft_prompts.append(prompt)
             ans = extract_ans(ground_truth, False)
             sft_responses.append(f"{ground_truth} </think> <answer> {ans} </answer>")
-    return correct_count
+    return correct_question_count
 
 
 def expert_iter(
