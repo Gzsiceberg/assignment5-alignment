@@ -1,4 +1,5 @@
 import os
+from typing import Callable
 os.environ["VLLM_LOGGING_LEVEL"] = "ERROR"
 import gc
 from vllm.sampling_params import SamplingParams
@@ -17,7 +18,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  #
 import torch
 import random
 from cs336_alignment.sft_helper import tokenize_to_tensor
-from cs336_alignment.sft import train_sft
+from cs336_alignment.sft import train_sft, vllm_evaluate
 from cs336_alignment.config import SftConfig, ExpertIterConfig, load_config_from_file
 from cs336_alignment.logger import setup_logging, print_and_log
 
@@ -129,6 +130,9 @@ if __name__ == "__main__":
     sampling_params = get_evaluation_sample_params(sample_batch_size, 2048)
     tokenizer = AutoTokenizer.from_pretrained(f"models/{model_id}")
 
+    eval_sampling_params: SamplingParams = get_evaluation_sample_params()
+    eval_prompts, eval_ground_truths = get_evaluation_samples(256, 4096)
+
     gpus_count = torch.cuda.device_count()
     vllm_device = "cuda:0" if gpus_count == 1 else "cuda:1"
     vllm = None
@@ -155,7 +159,8 @@ if __name__ == "__main__":
                 gpu_memory_utilization=0.85,
             )
             if llm is not None:
-                load_policy_into_vllm_instance(llm, vllm)
+                vllm_evaluate(llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
+            
 
         sft_prompts = []
         sft_responses = []

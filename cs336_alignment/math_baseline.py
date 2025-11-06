@@ -11,6 +11,7 @@ from rich import print
 from dataclasses import dataclass
 import torch
 from cs336_alignment.extract import extract_prompt_and_response
+from cs336_alignment.logger import print_and_log
 
 
 
@@ -82,10 +83,10 @@ def evaluate_vllm(
     avg_reward = total_rewards / total_entries if total_entries > 0 else 0.0
     avg_reward_v2 = total_rewards_v2 / total_entries if total_entries > 0 else 0.0
     avg_formatting_reward = total_formatting_rewards / total_entries if total_entries > 0 else 0.0
-    print("===== Evaluation Results =====")
-    print(f"Average Reward over {total_entries} samples: {avg_reward:.4f}")
-    print(f"Average Reward v2 over {total_entries} samples: {avg_reward_v2:.4f}")
-    print(f"Average Formatting Reward over {total_entries} samples: {avg_formatting_reward:.4f}")
+    print_and_log("===== Evaluation Results =====")
+    print_and_log(f"Average Reward over {total_entries} samples: {avg_reward:.4f}")
+    print_and_log(f"Average Reward v2 over {total_entries} samples: {avg_reward_v2:.4f}")
+    print_and_log(f"Average Formatting Reward over {total_entries} samples: {avg_formatting_reward:.4f}")
 
     if not dump_data:
         return
@@ -134,7 +135,7 @@ if __name__ == "__main__":
     random.seed(seed)
 
     gpu_count = torch.cuda.device_count()
-    print(f"gpu count: {gpu_count}")
+    print_and_log(f"gpu count: {gpu_count}")
     assert gpu_count >= 1, "At least one GPU is required."
 
     prompts, ground_truths = get_evaluation_samples(args.limit, args.offset)
