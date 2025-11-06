@@ -193,7 +193,9 @@ if __name__ == "__main__":
                 sub_batch_ground_truths,
             )
         assert len(sft_prompts) > 0, "No positive samples collected in this EI step."
-        print(f"Number of positive samples collected: {len(sft_prompts)}")
+        correct_count = len(sft_prompts)
+        accuracy = len(sft_prompts) / question_batch_size
+        print(f"Number of positive samples collected: {correct_count} accuracy={accuracy:.2f}")
 
         # Free up vLLM memory if on the same device
         if is_sample_device:
