@@ -233,7 +233,7 @@ if __name__ == "__main__":
         )
     
         if llm is not None:
-            print_and_log(f"{ei_step}/{n_ei_steps} Saving fine-tuned model to {output_dir}...")
+            print_and_log(f"{ei_step + 1}/{n_ei_steps} Saving fine-tuned model to {output_dir}...")
             llm.save_pretrained(save_directory=output_dir)  # type: ignore
             tokenizer.save_pretrained(save_directory=output_dir)
     
