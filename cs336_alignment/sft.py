@@ -225,7 +225,7 @@ if __name__ == "__main__":
     else:
         llm.train()  # set model to training mode
 
-    output_dir = f"models/sft_model_{config_name}"
+    output_dir = f"models/{config_name}"
     os.makedirs(output_dir, exist_ok=True)
 
     print_and_log("-" * 120)
