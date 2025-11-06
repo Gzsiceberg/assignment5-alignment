@@ -1,4 +1,6 @@
+from dataclasses import dataclass
 import os
+
 os.environ["VLLM_LOGGING_LEVEL"] = "ERROR"
 import gc
 from vllm.sampling_params import SamplingParams
@@ -20,6 +22,7 @@ from cs336_alignment.sft_helper import tokenize_to_tensor
 from cs336_alignment.sft import train_sft, vllm_evaluate
 from cs336_alignment.config import SftConfig, ExpertIterConfig, load_config_from_file
 from cs336_alignment.logger import setup_logging, print_and_log
+from cs336_alignment.extract import preprocess_text
 
 
 def cleanup():
@@ -31,27 +34,45 @@ def cleanup():
             pass
 
 
-def expert_iter_gen(
-    sample_batch_size: int,
+@dataclass
+class QuestionMetaInfo:
+    question_id: int = -1
+    correct_count: int = 0
+    sample_count: int = 0
+
+    def accuracy(self) -> float:
+        if self.sample_count == 0:
+            return 0.0
+        return self.correct_count / (self.sample_count + 8)
+
+
+def rollout(
     sampling_params: SamplingParams,
     vllm: LLM,
     sft_prompts: list[str],
     sft_responses: list[str],
-    sub_batch_prompts: list[str],
-    sub_batch_ground_truths: list[str],
+    sub_prompts: list[str],
+    sub_ground_truths: list[str],
+    sub_question_ids: list[int],
+    question_meta_infos: dict[int, QuestionMetaInfo],
     use_all_positive: bool = False,
 ) -> int:
-    from cs336_alignment.logger import print_and_log
-    outputs = vllm.generate(sub_batch_prompts, sampling_params=sampling_params)
+    outputs = vllm.generate(sub_prompts, sampling_params=sampling_params)
     correct_count = 0
-    for output, ground_truth, prompt in tqdm(
-        zip(outputs, sub_batch_ground_truths, sub_batch_prompts),
-        total=len(sub_batch_prompts),
+    for output, ground_truth, prompt, question_id in tqdm(
+        zip(outputs, sub_ground_truths, sub_prompts, sub_question_ids),
+        total=len(sub_prompts),
         desc="Processing generated outputs",
         leave=False,
     ):
         assert len(output.outputs) == sample_batch_size
+        if question_id not in question_meta_infos:
+            meta_info = QuestionMetaInfo(question_id)
+            question_meta_infos[question_id] = meta_info
+        else:
+            meta_info = question_meta_infos[question_id]
 
+        meta_info.sample_count += sample_batch_size
         min_len_resp: str = ""
         min_len = float("inf")
         has_correct = False
@@ -61,6 +82,7 @@ def expert_iter_gen(
             if reward_dict["reward"] <= 0:
                 continue
 
+            meta_info.correct_count += 1
             has_correct = True
             if use_all_positive:
                 sft_prompts.append(prompt)
@@ -78,17 +100,68 @@ def expert_iter_gen(
             resp = min_len_resp
             sft_prompts.append(prompt)
             sft_responses.append(resp)
-    
+
     if correct_count == 0:
         from cs336_alignment.extract import extract_ans
+
         print_and_log("Warning: No positive samples collected in this batch.")
         for i in range(4):
-            prompt = sub_batch_prompts[i]
-            ground_truth = sub_batch_ground_truths[i]
+            prompt = sub_prompts[i]
+            ground_truth = sub_ground_truths[i]
             sft_prompts.append(prompt)
             ans = extract_ans(ground_truth, False)
             sft_responses.append(f"{ground_truth} </think> <answer> {ans} </answer>")
     return correct_count
+
+
+def expert_iter(
+    expert_iter_config: ExpertIterConfig,
+    vllm_batch_size: int,
+    sampling_params: SamplingParams,
+    vllm: LLM,
+    question_meta_infos: dict[int, QuestionMetaInfo],
+    sample_question_ids: list[int],
+    sample_prompts: list[str],
+    sample_ground_truths: list[str],
+) -> tuple[list[str], list[str]]:
+    sft_prompts = []
+    sft_responses = []
+    from cs336_alignment.extract import extract_ans
+    if not expert_iter_config.do_rollout:
+        for prompt, ground_truth, question_id in zip(sample_prompts, sample_ground_truths, sample_question_ids):
+            sft_prompts.append(prompt)
+            ans = extract_ans(ground_truth, False)
+            sft_responses.append(f"{ground_truth} </think> <answer> {ans} </answer>")
+            if question_id not in question_meta_infos:
+                meta_info = QuestionMetaInfo(question_id)
+                question_meta_infos[question_id] = meta_info
+            else:
+                meta_info = question_meta_infos[question_id]
+            meta_info.sample_count += 1
+            meta_info.correct_count += 1
+        return sft_prompts, sft_responses
+
+    correct_count = 0
+    question_batch_size = len(sample_question_ids)
+    for i in trange(0, question_batch_size, vllm_batch_size, desc="Generating batches"):
+        sub_question_ids = sample_question_ids[i : i + vllm_batch_size]
+        sub_prompts = sample_prompts[i : i + vllm_batch_size]
+        sub_ground_truths = sample_ground_truths[i : i + vllm_batch_size]
+        correct_count += rollout(
+            sampling_params,
+            vllm,
+            sft_prompts,
+            sft_responses,
+            sub_prompts,
+            sub_ground_truths,
+            sub_question_ids,
+            question_meta_infos,
+            use_all_positive=expert_iter_config.use_all_positive,
+        )
+    assert len(sft_prompts) > 0, "No positive samples collected in this EI step."
+    accuracy = correct_count / question_batch_size
+    print_and_log(f"correct_count={correct_count} accuracy={accuracy:.2f} new_samples={len(sft_prompts)}")
+    return sft_prompts, sft_responses
 
 
 if __name__ == "__main__":
@@ -99,9 +172,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--config", type=str, required=False, help="Path to config file"
     )
-    parser.add_argument(
-        "-t", "--test", action="store_true", help="Run in test mode"
-    )
+    parser.add_argument("-t", "--test", action="store_true", help="Run in test mode")
     parser.add_argument(
         "--resume_from", type=int, default=0, help="EI step to resume from"
     )
@@ -152,13 +223,15 @@ if __name__ == "__main__":
     vllm = None
     train_device = "cuda:0"
     llm: PreTrainedModel | None = None
-    indices = np.array(range(len(prompts)))
+    question_ids = np.array(range(len(prompts)))
     is_sample_device = vllm_device == train_device
     output_dir = f"models/{output_model}"
     os.makedirs(output_dir, exist_ok=True)
     if args.resume_from > 0:
         n_ei_steps = n_ei_steps - args.resume_from
-        print_and_log(f"Resuming from EI step {args.resume_from}, remaining steps: {n_ei_steps}")
+        print_and_log(
+            f"Resuming from EI step {args.resume_from}, remaining steps: {n_ei_steps}"
+        )
         llm = AutoModelForCausalLM.from_pretrained(
             f"models/{output_model}",
             torch_dtype=torch.bfloat16,
@@ -167,13 +240,40 @@ if __name__ == "__main__":
         )
         llm.train()  # type: ignore
 
+    question_meta_infos: dict[int, QuestionMetaInfo] = {}
     for ei_step in trange(args.resume_from, n_ei_steps, desc="Expert Iteration Steps"):
-        np.random.shuffle(indices)
-        batch_indices = indices[:question_batch_size]
-        batch_prompts = [prompts[j] for j in batch_indices]
-        batch_ground_truths = [ground_truths[j] for j in batch_indices]
-        assert len(batch_prompts) == question_batch_size
-        assert len(batch_ground_truths) == question_batch_size
+        sample_weights = []
+        correct_question_total = 0
+        for idx in question_ids:
+            if idx in question_meta_infos:
+                meta_info = question_meta_infos[idx]
+                if meta_info.correct_count > 0:
+                    correct_question_total += 1
+                acc = meta_info.accuracy()
+                weight = 1.0 - acc
+                sample_weights.append(weight)
+            else:
+                sample_weights.append(1.0)
+        print_and_log(
+            f"EI Step {ei_step + 1}/{n_ei_steps}: {correct_question_total}/{len(question_ids)} questions have correct samples."
+        )
+        # Normalize weights
+        total_weight = sum(sample_weights)
+        sample_weights = [w / total_weight for w in sample_weights]
+        # Sample indices for this EI step
+        sample_question_ids = np.random.choice(
+            question_ids,
+            size=question_batch_size,
+            replace=False,
+            p=sample_weights,
+        )
+        sample_question_ids = list(sample_question_ids)
+        assert len(sample_question_ids) == question_batch_size
+
+        sample_prompts = [prompts[j] for j in sample_question_ids]
+        sample_ground_truths = [ground_truths[j] for j in sample_question_ids]
+        assert len(sample_prompts) == question_batch_size
+        assert len(sample_ground_truths) == question_batch_size
 
         if vllm is None:
             print("Initializing vLLM model for EI step...")
@@ -184,31 +284,20 @@ if __name__ == "__main__":
                 gpu_memory_utilization=0.85,
             )
             if llm is not None:
-                vllm_evaluate(llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
-            
+                vllm_evaluate(
+                    llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params
+                )
 
-        sft_prompts = []
-        sft_responses = []
-
-        correct_count = 0
-        for i in trange(
-            0, question_batch_size, vllm_batch_size, desc="Generating batches"
-        ):
-            sub_batch_prompts = batch_prompts[i : i + vllm_batch_size]
-            sub_batch_ground_truths = batch_ground_truths[i : i + vllm_batch_size]
-            correct_count += expert_iter_gen(
-                sample_batch_size,
-                sampling_params,
-                vllm,
-                sft_prompts,
-                sft_responses,
-                sub_batch_prompts,
-                sub_batch_ground_truths,
-                use_all_positive=expert_iter_config.use_all_positive,
-            )
-        assert len(sft_prompts) > 0, "No positive samples collected in this EI step."
-        accuracy = correct_count / question_batch_size
-        print_and_log(f"correct_count={correct_count} accuracy={accuracy:.2f} new_samples={len(sft_prompts)}")
+        sft_prompts, sft_responses = expert_iter(
+            expert_iter_config=expert_iter_config,
+            vllm_batch_size=vllm_batch_size,
+            sampling_params=sampling_params,
+            vllm=vllm,
+            question_meta_infos=question_meta_infos,
+            sample_question_ids=sample_question_ids,
+            sample_prompts=sample_prompts,
+            sample_ground_truths=sample_ground_truths,
+        )
 
         # Free up vLLM memory if on the same device
         if is_sample_device:
@@ -240,18 +329,21 @@ if __name__ == "__main__":
         train_sft(
             sft_config,
             train_device,
-            llm=llm, # type: ignore
+            llm=llm,  # type: ignore
             input_ids=input_ids,
             labels=labels,
             resp_mask=response_mask,
             print_entropy=True,
         )
-    
+
         if llm is not None:
-            print_and_log(f"{ei_step + 1}/{n_ei_steps} Saving fine-tuned model to {output_dir}...")
+            print_and_log(
+                f"{ei_step + 1}/{n_ei_steps} Saving fine-tuned model to {output_dir}..."
+            )
             llm.save_pretrained(save_directory=output_dir)  # type: ignore
-            tokenizer.save_pretrained(save_directory=output_dir)
-    
+            if ei_step == 0:
+                tokenizer.save_pretrained(save_directory=output_dir)
+
     if vllm is None:
         vllm = init_vllm(
             model_id=output_dir,

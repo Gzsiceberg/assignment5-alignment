@@ -21,6 +21,7 @@ class ExpertIterConfig(BaseModel):
     sample_batch_size: int = 8
     n_ei_steps: int = 5
     use_all_positive: bool = False
+    do_rollout: bool = True
 
 
 def load_config_from_file(config_path: str) -> dict:
