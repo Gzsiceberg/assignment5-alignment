@@ -7,4 +7,4 @@ SftConfig:
 ExpertIterConfig:
   question_batch_size: 512
   sample_batch_size: 8
-  n_ei_steps: 2
+  n_ei_steps: 5
