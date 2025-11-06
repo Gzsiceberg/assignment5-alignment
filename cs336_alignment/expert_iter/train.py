@@ -112,7 +112,8 @@ if __name__ == "__main__":
 
     sample_batch_size = expert_iter_config.sample_batch_size
     n_ei_steps = expert_iter_config.n_ei_steps
-    output_model = expert_iter_config.output_model_dir
+    base_name = os.path.splitext(os.path.basename(args.config))[0]
+    output_model = base_name
 
     prompts, ground_truths = get_evaluation_samples(sft_config.max_examples, 0)
     sampling_params = get_evaluation_sample_params(sample_batch_size)

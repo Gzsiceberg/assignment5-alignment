@@ -8,4 +8,3 @@ ExpertIterConfig:
   question_batch_size: 512
   sample_batch_size: 8
   n_ei_steps: 2
-  output_model_dir: "output/expert_iter"
