@@ -174,7 +174,7 @@ def train_sft(
 
     end_time = time.time()
     print_and_log(
-        f"Training time for {training_steps} steps: {end_time - start_time} seconds."
+        f"Training time for {training_steps} steps: {end_time - start_time:.2f} seconds."
     )
 
 
