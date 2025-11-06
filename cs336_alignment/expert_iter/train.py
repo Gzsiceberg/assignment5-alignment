@@ -43,7 +43,7 @@ class QuestionMetaInfo:
     def accuracy(self) -> float:
         if self.sample_count == 0:
             return 0.0
-        return self.correct_count / (self.sample_count + 2)
+        return min(self.correct_count / (self.sample_count + 2), 1.0)
 
 
 def rollout(
@@ -72,7 +72,8 @@ def rollout(
         else:
             meta_info = question_meta_infos[question_id]
 
-        meta_info.sample_count += sample_batch_size
+        meta_info.sample_count = sample_batch_size
+        meta_info.correct_count = meta_info.correct_count // 2
         min_len_resp: str = ""
         min_len = float("inf")
         has_correct = False
