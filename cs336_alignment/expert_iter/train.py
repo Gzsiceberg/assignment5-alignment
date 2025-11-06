@@ -1,3 +1,5 @@
+import os
+os.environ["VLLM_LOGGING_LEVEL"] = "ERROR"
 import gc
 from vllm.sampling_params import SamplingParams
 from vllm import LLM
@@ -13,7 +15,6 @@ import torch.distributed as dist
 import logging
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  # type: ignore
 import torch
-import os
 import random
 from cs336_alignment.sft_helper import tokenize_to_tensor
 from cs336_alignment.sft import train_sft
@@ -35,10 +36,12 @@ def expert_iter_gen(
     sampling_params: SamplingParams,
     vllm: LLM,
     sft_prompts: list[str],
-    sft_respones: list[str],
+    sft_responses: list[str],
     sub_batch_prompts: list[str],
     sub_batch_ground_truths: list[str],
 ):
+    from cs336_alignment.extract import extract_ans
+    from cs336_alignment.logger import print_and_log
     outputs = vllm.generate(sub_batch_prompts, sampling_params=sampling_params)
     for output, ground_truth, prompt in tqdm(
         zip(outputs, sub_batch_ground_truths, sub_batch_prompts),
@@ -50,9 +53,20 @@ def expert_iter_gen(
         for resp in output.outputs:
             resp_text = resp.text
             reward_dict = r1_zero_reward_fn(resp_text, ground_truth)
-            if reward_dict["reward"] > 0:
-                sft_prompts.append(prompt)
-                sft_respones.append(resp_text)
+            if reward_dict["reward"] <= 0:
+                continue
+            ans = extract_ans(ground_truth, False)
+            sft_prompts.append(prompt)
+            sft_responses.append(f"{resp} </think> <answer> {ans} </answer>")
+    
+    if len(sft_prompts) == 0:
+        print_and_log("Warning: No positive samples collected in this batch.")
+        for i in range(4):
+            prompt = sub_batch_prompts[i]
+            ground_truth = sub_batch_ground_truths[i]
+            sft_prompts.append(prompt)
+            ans = extract_ans(ground_truth, False)
+            sft_responses.append(f"{ground_truth} </think> <answer> {ans} </answer>")
 
 
 if __name__ == "__main__":
@@ -93,6 +107,7 @@ if __name__ == "__main__":
         vllm_batch_size = int(32 / 8 * vllm_batch_size)
     elif gpu_memory >= 16:
         vllm_batch_size = int(16 / 8 * vllm_batch_size)
+    vllm_batch_size = min(vllm_batch_size, question_batch_size)
     print_and_log(f"Using vLLM batch size: {vllm_batch_size}")
 
     sample_batch_size = expert_iter_config.sample_batch_size
@@ -148,23 +163,28 @@ if __name__ == "__main__":
                 sub_batch_prompts,
                 sub_batch_ground_truths,
             )
+        assert len(sft_prompts) > 0, "No positive samples collected in this EI step."
         print(f"Number of positive samples collected: {len(sft_prompts)}")
 
         # Free up vLLM memory if on the same device
         if is_sample_device:
             del vllm
             vllm = None
+            print_and_log("Clearing vLLM from memory...")
             gc.collect()
 
         tokenized_data = tokenize_to_tensor(sft_prompts, sft_responses, tokenizer)
-        input_ids = tokenized_data["input_ids"]
-        response_mask = tokenized_data["response_mask"]
-        labels = tokenized_data["labels"] 
+        input_ids = tokenized_data["input_ids"].to(train_device)
+        response_mask = tokenized_data["response_mask"].to(train_device)
+        labels = tokenized_data["labels"].to(train_device)
+        print_and_log("Tokenization complete.")
+        print_and_log(f"Input IDs shape: {input_ids.shape}")
 
         if args.test:
             break
 
         if llm is None:
+            print_and_log("Loading model for SFT training...")
             llm = AutoModelForCausalLM.from_pretrained(
                 f"models/{sft_config.model_id}",
                 torch_dtype=torch.bfloat16,
@@ -173,7 +193,6 @@ if __name__ == "__main__":
             )
             llm.train()  # type: ignore
 
-        print_and_log("Starting SFT training step...")
         train_sft(
             sft_config,
             train_device,

@@ -83,6 +83,7 @@ def train_sft(
     eval_function: Callable[[PreTrainedModel], None] | None = None,
     print_entropy: bool = False,
 ):
+    print_and_log("-" * 80)
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
@@ -93,8 +94,11 @@ def train_sft(
     iter_batch_size = (
         sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
     )
-    training_steps = sft_config.num_epochs * example_count // iter_batch_size
-    print(
+    total_training_examples = example_count * sft_config.num_epochs
+    if total_training_examples < iter_batch_size:
+        iter_batch_size = total_training_examples
+    training_steps = total_training_examples // iter_batch_size
+    print_and_log(
         f"Total training steps: {training_steps} batch size: {iter_batch_size} example count: {example_count}"
     )
     eval_interval = (
@@ -102,7 +106,8 @@ def train_sft(
         if sft_config.eval_interval > 0
         else 0
     )
-    print_and_log(f"Evaluation interval (in steps): {eval_interval}")
+    if eval_interval > 0:
+        print_and_log(f"Evaluation interval (in steps): {eval_interval}")
 
     start_time = time.time()
     warmup_steps = int(0.02 * training_steps)
@@ -155,7 +160,7 @@ def train_sft(
 
         total_loss = total_loss / gradient_accumulation_steps
         total_entropy = total_entropy / gradient_accumulation_steps
-        print(
+        print_and_log(
             f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f} - AvgEntropy: {total_entropy.item():.4f}"
         )
         pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}")  # type: ignore
