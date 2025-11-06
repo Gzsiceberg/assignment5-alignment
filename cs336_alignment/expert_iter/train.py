@@ -116,7 +116,7 @@ if __name__ == "__main__":
     output_model = base_name
 
     prompts, ground_truths = get_evaluation_samples(sft_config.max_examples, 0)
-    sampling_params = get_evaluation_sample_params(sample_batch_size)
+    sampling_params = get_evaluation_sample_params(sample_batch_size, 2048)
     tokenizer = AutoTokenizer.from_pretrained(f"models/{model_id}")
 
     gpus_count = torch.cuda.device_count()
