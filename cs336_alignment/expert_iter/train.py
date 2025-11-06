@@ -138,7 +138,7 @@ if __name__ == "__main__":
     is_sample_device = vllm_device == train_device
     output_dir = f"models/{output_model}"
     os.makedirs(output_dir, exist_ok=True)
-    for _ in range(n_ei_steps):
+    for ei_step in trange(n_ei_steps, desc="Expert Iteration Steps"):
         np.random.shuffle(indices)
         batch_indices = indices[:question_batch_size]
         batch_prompts = [prompts[j] for j in batch_indices]
