@@ -237,12 +237,12 @@ if __name__ == "__main__":
             llm.save_pretrained(save_directory=output_dir)  # type: ignore
             tokenizer.save_pretrained(save_directory=output_dir)
     
-    if vllm is not None:
+    if vllm is None:
         vllm = init_vllm(
             model_id=output_dir,
             device=vllm_device,
             seed=42,
             gpu_memory_utilization=0.85,
         )
-        vllm_evaluate(None, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
+    vllm_evaluate(None, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
     cleanup()
