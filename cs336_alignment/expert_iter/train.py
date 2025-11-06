@@ -221,4 +221,13 @@ if __name__ == "__main__":
         print_and_log(f"Saving fine-tuned model to {output_dir}...")
         llm.save_pretrained(save_directory=output_dir)  # type: ignore
         tokenizer.save_pretrained(save_directory=output_dir)
+    
+    if vllm is not None:
+        vllm = init_vllm(
+            model_id=f"models/{model_id}",
+            device=vllm_device,
+            seed=42,
+            gpu_memory_utilization=0.85,
+        )
+        vllm_evaluate(llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
     cleanup()
