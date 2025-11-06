@@ -160,7 +160,8 @@ def expert_iter(
         )
     assert len(sft_prompts) > 0, "No positive samples collected in this EI step."
     accuracy = correct_count / question_batch_size
-    print_and_log(f"correct_count={correct_count} accuracy={accuracy:.2f} new_samples={len(sft_prompts)}")
+    correct_question_total = sum(1 for meta in question_meta_infos.values() if meta.correct_count > 0)
+    print_and_log(f"correct_count={correct_count} accuracy={accuracy:.2f} new_samples={len(sft_prompts)} correct_questions={correct_question_total}")
     return sft_prompts, sft_responses
 
 
