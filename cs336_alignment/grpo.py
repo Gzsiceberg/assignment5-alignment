@@ -17,6 +17,7 @@ from cs336_alignment.logger import print_and_log, setup_logging
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel # type: ignore
 from cs336_alignment.vllm_util import init_vllm  # type: ignore
 from cs336_alignment.config import load_config_from_file
+from einops import rearrange, einsum
 import typer
 
 
@@ -71,6 +72,10 @@ def compute_naive_policy_gradient_loss(
     raw_rewards_or_advantages: torch.Tensor,
     policy_log_probs: torch.Tensor,
 ) -> torch.Tensor:
+    if raw_rewards_or_advantages.ndim == 1:
+        raw_rewards_or_advantages = rearrange(
+            raw_rewards_or_advantages, "b -> b 1"
+        )
     return -policy_log_probs * raw_rewards_or_advantages
 
 
@@ -102,6 +107,10 @@ def compute_policy_gradient_loss(
     cliprange: float | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     batch_size, seq_len = policy_log_probs.shape
+    assert raw_rewards is None or raw_rewards.shape[0] == batch_size, "Raw rewards shape mismatch"
+    assert advantages is None or advantages.shape[0] == batch_size, "Advantages shape mismatch"
+    assert old_log_probs is None or old_log_probs.shape == policy_log_probs.shape, "Old log probs shape mismatch"
+
     meta_info = {}
     match loss_type:
         case "no_baseline":
@@ -123,7 +132,7 @@ def compute_policy_gradient_loss(
             )
             meta_info.update(meta_info_clip)
 
-    assert loss.shape == (batch_size, seq_len), "Final loss shape mismatch"
+    assert loss.shape == (batch_size, seq_len), f"loss shape mismatch: expected {(batch_size, seq_len)}, got {loss.shape}"
     return loss, meta_info
 
 
@@ -163,9 +172,9 @@ def get_data_batch(
     start_idx = micro_iter * micro_batch_size
     end_idx = start_idx + micro_batch_size
     assert end_idx <= input_ids.shape[0], "Batch index out of range"
-    batch_input_ids = input_ids[start_idx:end_idx, :].to(input_ids.device)
-    batch_labels = labels[start_idx:end_idx, :].to(labels.device)
-    batch_resp_mask = resp_mask[start_idx:end_idx, :].to(resp_mask.device)
+    batch_input_ids = input_ids[start_idx:end_idx, :]
+    batch_labels = labels[start_idx:end_idx, :]
+    batch_resp_mask = resp_mask[start_idx:end_idx, :]
     return batch_input_ids, batch_labels, batch_resp_mask
 
 
@@ -194,18 +203,23 @@ def train_pg(
     )
     micro_batch_size = sft_config.micro_batch_size
 
+    assert sample_count == micro_batch_size * gradient_accumulation_steps, \
+        "Sample count must equal micro_batch_size * gradient_accumulation_steps"
+
     get_data_batch_fn = lambda micro_iter, micro_batch_size: get_data_batch(
         micro_iter, micro_batch_size, input_ids, labels, resp_mask
     )
 
-    micro_batch_train_step_fn = lambda policy_log_probs, response_mask, gradient_accumulation_steps: grpo_microbatch_train_step(
+    micro_batch_train_step_fn = lambda micro_iter, micro_batch_size, \
+        policy_log_probs, response_mask, gradient_accumulation_steps: \
+            grpo_microbatch_train_step(
         policy_log_probs,
         response_mask,
         gradient_accumulation_steps,
         rl_config.loss_type,
-        raw_rewards,
-        advantages,
-        old_log_probs,
+        raw_rewards[micro_iter * micro_batch_size:(micro_iter + 1) * micro_batch_size] if raw_rewards is not None else None,
+        advantages[micro_iter * micro_batch_size:(micro_iter + 1) * micro_batch_size] if advantages is not None else None,
+        old_log_probs[micro_iter * micro_batch_size:(micro_iter + 1) * micro_batch_size] if old_log_probs is not None else None,
         rl_config.cliprange,
     )
 

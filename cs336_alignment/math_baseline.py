@@ -12,7 +12,9 @@ from dataclasses import dataclass
 import torch
 from cs336_alignment.extract import extract_prompt_and_response
 from cs336_alignment.logger import print_and_log
+from joblib import Memory
 
+memory = Memory("data/.cache", verbose=0)
 
 
 @dataclass
@@ -95,6 +97,7 @@ def evaluate_vllm(
         pickle.dump(eval_entries, f)
     
 
+@memory.cache
 def get_evaluation_samples(limit: int, offset: int) -> tuple[List[str], List[str]]:
     ds = load_dataset("hkust-nlp/dart-math-uniform")
     train: datasets.Dataset = ds["train"] # type: ignore

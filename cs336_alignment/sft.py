@@ -102,16 +102,23 @@ def do_grad_accumulate(
     train_device,
     llm,
     get_data_batch_fn: Callable[[int, int], tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
-    micro_batch_train_step_fn: Callable[[torch.Tensor, torch.Tensor, int], tuple[torch.Tensor, dict[str, torch.Tensor]]],
+    micro_batch_train_step_fn: Callable[[int, int, torch.Tensor, torch.Tensor, int], tuple[torch.Tensor, dict[str, torch.Tensor]]],
     print_entropy,
     gradient_accumulation_steps,
     micro_batch_size,
 ):
     total_loss = torch.tensor(0.0, device=train_device)
     total_entropy = torch.tensor(0.0, device=train_device)
-    for micro_iter in trange( gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
+    for micro_iter in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
         batch_input_ids, batch_labels, batch_resp_mask = get_data_batch_fn(micro_iter, micro_batch_size)
+        batch_input_ids = batch_input_ids.to(train_device)
+        batch_labels = batch_labels.to(train_device)
+        batch_resp_mask = batch_resp_mask.to(train_device)
         sample_content_length = batch_input_ids.shape[1]
+        assert batch_input_ids.shape == (micro_batch_size, sample_content_length)
+        assert batch_labels.shape == (micro_batch_size, sample_content_length)
+        assert batch_resp_mask.shape == (micro_batch_size, sample_content_length)
+
 
         with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
             results = get_response_log_probs(
@@ -136,7 +143,7 @@ def do_grad_accumulate(
                     total_entropy += avg_token_entropy / gradient_accumulation_steps
 
             assert log_probs.shape == (micro_batch_size, sample_content_length)
-            loss, _ = micro_batch_train_step_fn(log_probs, batch_resp_mask, gradient_accumulation_steps)
+            loss, _ = micro_batch_train_step_fn(micro_iter, micro_batch_size, log_probs, batch_resp_mask, gradient_accumulation_steps)
             total_loss += loss.detach()
     return total_loss, total_entropy
 
@@ -164,7 +171,7 @@ def train_sft(
         sample_count, micro_batch_size, sample_content_length, input_ids, labels, resp_mask
     )
 
-    micro_batch_train_step_fn = lambda policy_log_probs, response_mask, gradient_accumulation_steps: sft_microbatch_train_step(
+    micro_batch_train_step_fn = lambda _0, _1, policy_log_probs, response_mask, gradient_accumulation_steps: sft_microbatch_train_step(
         policy_log_probs, response_mask, gradient_accumulation_steps, normalize_constant=1.0
     )
 
