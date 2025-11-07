@@ -15,7 +15,7 @@ from transformers import get_cosine_schedule_with_warmup  # type: ignore
 from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 from cs336_alignment.config import load_config_from_file, SftConfig
 from cs336_alignment.logger import setup_logging, print_and_log
-from cs336_alignment.sft_helper import masked_normalize, get_response_log_probs, sft_microbatch_train_step
+from cs336_alignment.sft_helper import masked_normalize, masked_mean, get_response_log_probs, sft_microbatch_train_step
 from cs336_alignment.math_baseline import (
     evaluate_vllm,
     get_evaluation_sample_params,
@@ -144,8 +144,8 @@ def train_sft(
                     with torch.no_grad():
                         token_entropy = results["token_entropy"]
                         assert token_entropy.shape == (micro_batch_size, sample_content_length)
-                        avg_token_entropy = masked_normalize(token_entropy, batch_resp_mask, normalize_constant=micro_batch_size)
-                        total_entropy += avg_token_entropy.detach()
+                        avg_token_entropy = masked_mean(token_entropy, batch_resp_mask, dim=1, protect_zero_division=True).mean()
+                        total_entropy += avg_token_entropy.detach() / gradient_accumulation_steps
                     
                 assert log_probs.shape == (micro_batch_size, sample_content_length)
                 loss, _ = sft_microbatch_train_step(
@@ -164,8 +164,6 @@ def train_sft(
         lr_scheduler.step()
         optimizer.zero_grad()
 
-        total_loss = total_loss / gradient_accumulation_steps
-        total_entropy = total_entropy / gradient_accumulation_steps
         print_and_log(
             f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f} - Entropy: {total_entropy.item():.4f}"
         )
