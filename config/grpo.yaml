@@ -1,0 +1,8 @@
+SftConfig:
+  num_epochs: 1
+  learning_rate: 1e-5
+  gradient_accumulation_steps: 32
+  micro_batch_size: 8
+
+RLConfig:
+  loss_type: "reinforce_with_baseline"

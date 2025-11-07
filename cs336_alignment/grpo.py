@@ -1,5 +1,6 @@
 import gc
 import os
+os.environ["VLLM_LOGGING_LEVEL"] = "ERROR"
 import time
 import torch
 import numpy as np
@@ -13,9 +14,23 @@ from cs336_alignment.math_baseline import get_evaluation_sample_params, get_eval
 from cs336_alignment.sft import cleanup, do_grad_accumulate, vllm_evaluate
 from cs336_alignment.sft_helper import masked_normalize, masked_mean, tokenize_to_tensor
 from cs336_alignment.logger import print_and_log, setup_logging
-from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
-
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel # type: ignore
 from cs336_alignment.vllm_util import init_vllm  # type: ignore
+from cs336_alignment.config import load_config_from_file
+import typer
+
+
+def repeat_items_by_group_size(items: list, group_size: int) -> list:
+    """Efficiently repeat each item in the list by group_size times.
+    
+    Args:
+        items: List of items to repeat
+        group_size: Number of times to repeat each item
+    
+    Returns:
+        List with each item repeated group_size times in sequence
+    """
+    return [item for item in items for _ in range(group_size)]
 
 
 def compute_group_normalized_rewards(
@@ -233,33 +248,46 @@ def train_pg(
 
 
 def rollout(sampling_params: SamplingParams, vllm: LLM, prompts: list[str]) -> list[str]:
+    n = sampling_params.n
     outputs = vllm.generate(prompts, sampling_params=sampling_params)
     rollout_responses = []
     for output in tqdm(outputs, total=len(prompts), desc="Processing generated outputs", leave=False):
+        assert len(output.outputs) == n, "Output count mismatch in rollout"
         for resp in output.outputs:
             resp_text = resp.text
             rollout_responses.append(resp_text)
     return rollout_responses
 
-if __name__ == "__main__":
-    config_name = "grpo.yaml"
-    sft_config = SftConfig()
-    rl_config = RLConfig()
-    setup_logging("grpo_training.log")
+
+def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
+    config = load_config_from_file(config_name)
+    sft_config: SftConfig = SftConfig(**config["SftConfig"])
+    rl_config: RLConfig = RLConfig(**config["RLConfig"])
+    base_name = os.path.splitext(os.path.basename(config_name))[0]
+    setup_logging(f"{base_name}.log")
 
     model_id = sft_config.model_id
     sample_question_size = rl_config.rollout_batch_size // rl_config.group_size
     assert rl_config.rollout_batch_size % rl_config.group_size == 0, "Rollout batch size must be divisible by group size"
+    if rl_config.rollout_batch_size != sft_config.micro_batch_size * sft_config.gradient_accumulation_steps:
+        print_and_log(
+            f"Warning: Rollout batch size {rl_config.rollout_batch_size} does not equal micro_batch_size * gradient_accumulation_steps ({sft_config.micro_batch_size} * {sft_config.gradient_accumulation_steps} = {sft_config.micro_batch_size * sft_config.gradient_accumulation_steps}). This may lead to inefficient training."
+        )
+        sft_config.micro_batch_size = rl_config.rollout_batch_size // sft_config.gradient_accumulation_steps
+    assert rl_config.rollout_batch_size == sft_config.micro_batch_size * sft_config.gradient_accumulation_steps, \
+        "Rollout batch size must equal micro_batch_size * gradient_accumulation_steps"
+    
+    print_and_log(f"sft_config: {sft_config}")
+    print_and_log(f"rl_config: {rl_config}")
 
-    prompts, ground_truths = get_evaluation_samples(sft_config.max_examples, 0)
-    sampling_params = get_evaluation_sample_params(sample_question_size, 2048 - 512 - 256)
     tokenizer = AutoTokenizer.from_pretrained(f"models/{model_id}")
 
-    eval_sampling_params: SamplingParams = get_evaluation_sample_params(1, 2048)
-    eval_prompts, eval_ground_truths = get_evaluation_samples(256, 4096)
+    prompts, ground_truths = get_evaluation_samples(sft_config.max_examples, 0)
+    sampling_params = get_evaluation_sample_params(rl_config.group_size, 2048 - 512 - 256)
 
+    eval_prompts, eval_ground_truths = get_evaluation_samples(512, 4096)
+    eval_sampling_params: SamplingParams = get_evaluation_sample_params(1, 2048 - 512 - 256)
 
-    base_name = os.path.splitext(os.path.basename(config_name))[0]
     output_model = base_name
     gpus_count = torch.cuda.device_count()
     vllm_device = "cuda:0" if gpus_count == 1 else "cuda:1"
@@ -272,6 +300,7 @@ if __name__ == "__main__":
 
     os.makedirs(output_dir, exist_ok=True)
     tokenizer.save_pretrained(output_dir)
+    rollout_batch_size = rl_config.rollout_batch_size
     for step in (pbar:= trange(rl_config.steps, desc="GRPO Overall Steps")):
         is_last_step = (step + 1) == rl_config.steps
         print_and_log(f"GRPO Overall Step {step+1}/{rl_config.steps} starting...")
@@ -288,7 +317,7 @@ if __name__ == "__main__":
         assert len(sample_ground_truths) == sample_question_size
 
         if vllm is None:
-            print("Initializing vLLM model for EI step...")
+            print("Initializing vLLM model for grpo step...")
             vllm = init_vllm(
                 model_id=f"models/{model_id}",
                 device=vllm_device,
@@ -301,13 +330,15 @@ if __name__ == "__main__":
                 llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params
             )
         
-        rollout_responses = rollout(sampling_params, vllm, sample_prompts * rl_config.group_size)
-        assert len(rollout_responses) == rl_config.rollout_batch_size
+        # Create rollout lists efficiently using helper function
+        rollout_prompts = repeat_items_by_group_size(sample_prompts, rl_config.group_size)
+        rollout_ground_truths = repeat_items_by_group_size(sample_ground_truths, rl_config.group_size)
+        assert len(rollout_ground_truths) == rollout_batch_size, f"Expected {rollout_batch_size} rollout ground truths, got {len(rollout_ground_truths)}"
+        assert len(rollout_prompts) == rollout_batch_size, f"Expected {rollout_batch_size} rollout prompts, got {len(rollout_prompts)}"
 
-        rollout_ground_truths = []
-        for gt in sample_ground_truths:
-            rollout_ground_truths.extend([gt] * rl_config.group_size)
-        assert len(rollout_ground_truths) == rl_config.rollout_batch_size
+        rollout_responses = rollout(sampling_params, vllm, sample_prompts)
+        assert len(rollout_responses) == rollout_batch_size, f"Expected {rollout_batch_size} rollout responses, got {len(rollout_responses)}"
+
         advantages, raw_rewards, reward_meta_info = compute_group_normalized_rewards(
             rollout_responses,
             rollout_ground_truths,
@@ -315,6 +346,8 @@ if __name__ == "__main__":
             rl_config.advantage_eps,
             rl_config.use_std_normalization,
         )
+        advantages = advantages.to(train_device)
+        raw_rewards = raw_rewards.to(train_device)
         mean_reward = reward_meta_info["mean_reward"]
         print_and_log(f"Mean Reward for this rollout: {mean_reward:.4f}")
 
@@ -325,10 +358,6 @@ if __name__ == "__main__":
             print_and_log("Clearing vLLM from memory...")
             gc.collect()
         
-        rollout_prompts = []
-        for p in sample_prompts:
-            rollout_prompts.extend([p] * rl_config.group_size)
-        assert len(rollout_prompts) == rl_config.rollout_batch_size
         tokenized_data = tokenize_to_tensor(rollout_prompts, rollout_ground_truths, tokenizer)
         input_ids = tokenized_data["input_ids"].to(train_device)
         response_mask = tokenized_data["response_mask"].to(train_device)
@@ -365,4 +394,8 @@ if __name__ == "__main__":
             llm.save_pretrained(output_dir)
 
 
-    cleanup()
+if __name__ == "__main__":
+    try:
+        typer.run(train)
+    finally:
+        cleanup()
