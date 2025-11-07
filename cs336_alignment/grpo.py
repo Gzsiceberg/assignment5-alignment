@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from typing import Callable, Literal
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+from cs336_alignment.sft_helper import masked_normalize, masked_mean
 
 
 def compute_group_normalized_rewards(
@@ -96,3 +97,29 @@ def compute_policy_gradient_loss(
 
     assert loss.shape == (batch_size, seq_len), "Final loss shape mismatch"
     return loss, meta_info
+
+
+def grpo_microbatch_train_step(
+    policy_log_probs: torch.Tensor,
+    response_mask: torch.Tensor,
+    gradient_accumulation_steps: int,
+    loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"],
+    raw_rewards: torch.Tensor | None = None,
+    advantages: torch.Tensor | None = None,
+    old_log_probs: torch.Tensor | None = None,
+    cliprange: float | None = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    batch_size, seq_len = policy_log_probs.shape
+    loss, meta_info = compute_policy_gradient_loss(
+        policy_log_probs,
+        loss_type,
+        raw_rewards,
+        advantages,
+        old_log_probs,
+        cliprange,
+    )
+    masked_loss = masked_mean(loss, response_mask, dim=1, protect_zero_division=False)
+    assert masked_loss.shape == (batch_size,), "Masked loss shape mismatch"
+    mean_loss = masked_loss.mean() / gradient_accumulation_steps
+    mean_loss.backward()
+    return mean_loss, meta_info
