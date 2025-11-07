@@ -3,6 +3,7 @@ import os
 import yaml
 import typing
 from pydantic import BaseModel
+from typing import Callable, Literal
 
 
 class SftConfig(BaseModel):
@@ -15,6 +16,11 @@ class SftConfig(BaseModel):
     max_examples: int = 1024
     compile_model: bool = False
     clip_gradients: float = 1.0
+
+class RLConfig(BaseModel):
+    loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"] = "reinforce_with_baseline"
+    cliprange: float = 0.2
+
 
 class ExpertIterConfig(BaseModel):
     question_batch_size: int = 512

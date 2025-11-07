@@ -15,7 +15,12 @@ from transformers import get_cosine_schedule_with_warmup  # type: ignore
 from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
 from cs336_alignment.config import load_config_from_file, SftConfig
 from cs336_alignment.logger import setup_logging, print_and_log
-from cs336_alignment.sft_helper import masked_normalize, masked_mean, get_response_log_probs, sft_microbatch_train_step
+from cs336_alignment.sft_helper import (
+    masked_normalize,
+    masked_mean,
+    get_response_log_probs,
+    sft_microbatch_train_step,
+)
 from cs336_alignment.math_baseline import (
     evaluate_vllm,
     get_evaluation_sample_params,
@@ -78,6 +83,63 @@ def vllm_evaluate(
         dump_data=False,
     )
 
+def get_data_batch(
+    sample_count: int, micro_batch_size: int, sample_content_length: int,
+    input_ids: torch.Tensor, labels: torch.Tensor, resp_mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    random_index = np.random.randint(0, sample_count, size=micro_batch_size)
+    batch_input_ids, batch_labels, batch_resp_mask = (
+        input_ids[random_index],
+        labels[random_index],
+        resp_mask[random_index],
+    )
+    assert batch_input_ids.shape == (micro_batch_size, sample_content_length)
+    assert batch_labels.shape == (micro_batch_size, sample_content_length)
+    assert batch_resp_mask.shape == (micro_batch_size, sample_content_length)
+    return batch_input_ids, batch_labels, batch_resp_mask
+
+def do_grad_accumulate(
+    train_device,
+    llm,
+    get_data_batch_fn: Callable[[int, int], tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+    micro_batch_train_step_fn: Callable[[torch.Tensor, torch.Tensor, int], tuple[torch.Tensor, dict[str, torch.Tensor]]],
+    print_entropy,
+    gradient_accumulation_steps,
+    micro_batch_size,
+):
+    total_loss = torch.tensor(0.0, device=train_device)
+    total_entropy = torch.tensor(0.0, device=train_device)
+    for micro_iter in trange( gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
+        batch_input_ids, batch_labels, batch_resp_mask = get_data_batch_fn(micro_iter, micro_batch_size)
+        sample_content_length = batch_input_ids.shape[1]
+
+        with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
+            results = get_response_log_probs(
+                llm, batch_input_ids, 
+                batch_labels, 
+                return_token_entropy=print_entropy  # type: ignore
+            )
+            log_probs = results["log_probs"]
+            if print_entropy:
+                with torch.no_grad():
+                    token_entropy = results["token_entropy"]
+                    assert token_entropy.shape == (
+                        micro_batch_size,
+                        sample_content_length,
+                    )
+                    avg_token_entropy = masked_mean(
+                        token_entropy,
+                        batch_resp_mask,
+                        dim=1,
+                        protect_zero_division=True,
+                    ).mean()
+                    total_entropy += avg_token_entropy / gradient_accumulation_steps
+
+            assert log_probs.shape == (micro_batch_size, sample_content_length)
+            loss, _ = micro_batch_train_step_fn(log_probs, batch_resp_mask, gradient_accumulation_steps)
+            total_loss += loss.detach()
+    return total_loss, total_entropy
+
 
 def train_sft(
     sft_config: SftConfig,
@@ -93,8 +155,18 @@ def train_sft(
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
-    optimizer = torch.optim.AdamW(llm.parameters(), lr=sft_config.learning_rate, fused=True)
+    optimizer = torch.optim.AdamW(
+        llm.parameters(), lr=sft_config.learning_rate, fused=True
+    )
     micro_batch_size = sft_config.micro_batch_size
+
+    get_data_batch_fn = lambda micro_iter, micro_batch_size: get_data_batch(
+        sample_count, micro_batch_size, sample_content_length, input_ids, labels, resp_mask
+    )
+
+    micro_batch_train_step_fn = lambda policy_log_probs, response_mask, gradient_accumulation_steps: sft_microbatch_train_step(
+        policy_log_probs, response_mask, gradient_accumulation_steps, normalize_constant=1.0
+    )
 
     example_count = input_ids.shape[0]
     iter_batch_size = (
@@ -121,37 +193,15 @@ def train_sft(
         optimizer, warmup_steps, training_steps
     )
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
-        total_loss = torch.tensor(0.0, device=train_device)
-        total_entropy = torch.tensor(0.0, device=train_device)
-        for _ in trange(
-            gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False
-        ):
-            random_index = np.random.randint(0, sample_count, size=micro_batch_size)
-            batch_input_ids, batch_labels, batch_resp_mask = (
-                input_ids[random_index],
-                labels[random_index],
-                resp_mask[random_index],
-            )
-            assert batch_input_ids.shape == (micro_batch_size, sample_content_length)
-            assert batch_labels.shape == (micro_batch_size, sample_content_length)
-            assert batch_resp_mask.shape == (micro_batch_size, sample_content_length)
-            with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
-                results = get_response_log_probs(
-                    llm, batch_input_ids, batch_labels, return_token_entropy=print_entropy  # type: ignore
-                )
-                log_probs = results["log_probs"]
-                if print_entropy:
-                    with torch.no_grad():
-                        token_entropy = results["token_entropy"]
-                        assert token_entropy.shape == (micro_batch_size, sample_content_length)
-                        avg_token_entropy = masked_mean(token_entropy, batch_resp_mask, dim=1, protect_zero_division=True).mean()
-                        total_entropy += avg_token_entropy / gradient_accumulation_steps
-                    
-                assert log_probs.shape == (micro_batch_size, sample_content_length)
-                loss, _ = sft_microbatch_train_step(
-                    log_probs, batch_resp_mask, gradient_accumulation_steps, 1.0
-                )
-                total_loss += loss.detach()
+        total_loss, total_entropy = do_grad_accumulate(
+            train_device=train_device,
+            llm=llm,
+            get_data_batch_fn=get_data_batch_fn,
+            micro_batch_train_step_fn=micro_batch_train_step_fn,
+            print_entropy=print_entropy,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            micro_batch_size=micro_batch_size
+        )
 
         if sft_config.clip_gradients > 0.0:
             # implement gradient clipping if needed
@@ -180,6 +230,7 @@ def train_sft(
     print_and_log(
         f"Training time for {training_steps} steps: {end_time - start_time:.2f} seconds."
     )
+
 
 
 if __name__ == "__main__":
@@ -274,7 +325,7 @@ if __name__ == "__main__":
     train_sft(
         sft_config,
         train_device,
-        llm, # type: ignore
+        llm,  # type: ignore
         input_ids,
         labels,
         resp_mask,
