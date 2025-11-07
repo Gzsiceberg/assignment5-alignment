@@ -419,7 +419,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
 
 def get_log_probs(sft_config: SftConfig, llm: PreTrainedModel, rollout_batch_size: int, 
                    input_ids: torch.Tensor, response_mask: torch.Tensor, labels: torch.Tensor):
-    old_log_probs = torch.empty((rollout_batch_size, input_ids.shape[1]), dtype=torch.float32)
+    old_log_probs = torch.empty((rollout_batch_size, input_ids.shape[1]), dtype=torch.float32, device=input_ids.device)
     micro_batch_size = sft_config.micro_batch_size
     for micro_iter in tqdm(range(sft_config.gradient_accumulation_steps), desc="Computing old log probs", leave=False):
         batch_input_ids, batch_labels, batch_resp_mask = get_data_batch(
