@@ -20,6 +20,21 @@ def masked_normalize(
     return sum_tensor / normalize_constant
 
 
+def masked_mean(
+    tensor: torch.Tensor,
+    mask: torch.Tensor,
+    dim: int | None = None,
+    protect_zero_division: bool = True,
+) -> torch.Tensor:
+    sum_tensor = masked_normalize(tensor, mask, normalize_constant=1.0, dim=dim)
+    count = torch.sum(mask, dim=dim)
+    if protect_zero_division:
+        count = torch.clamp(count, min=1.0)
+    mean_tensor = sum_tensor / count
+    return mean_tensor
+    
+
+
 def get_response_log_probs(
     model: PreTrainedModel,
     input_ids: Int[torch.Tensor, "batch seq_len"],
@@ -268,7 +283,9 @@ if __name__ == "__main__":
     data_math = load_dataset("hkust-nlp/dart-math-uniform")
     data_type: str = args.type
     ds: datasets.Dataset = data_math[data_type]  # type: ignore
-    prompts, responses = extract_prompt_and_response_with_format(ds, args.limit, args.offset)
+    prompts, responses = extract_prompt_and_response_with_format(
+        ds, args.limit, args.offset
+    )
 
     if args.to_np:
         tokenize_to_np(prompts, responses, tokenizer, data_type)
@@ -286,6 +303,7 @@ if __name__ == "__main__":
     print(labels.shape)
 
     import numpy as np
+
     print("Saving tokenized data to .npy files...")
     np.save("data/input_ids_tensor.npy", input_ids.numpy())
     np.save("data/response_mask_tensor.npy", response_mask.numpy())
