@@ -43,3 +43,22 @@ def compute_naive_policy_gradient_loss(
     policy_log_probs: torch.Tensor,
 ) -> torch.Tensor:
     return -policy_log_probs * raw_rewards_or_advantages
+
+
+def compute_grpo_clip_loss(
+    advantages: torch.Tensor,
+    policy_log_probs: torch.Tensor,
+    old_log_probs: torch.Tensor,
+    cliprange: float,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    batch_size, seq_len = policy_log_probs.shape
+    assert advantages.shape == (batch_size, 1), "Advantages shape mismatch"
+    ratio = torch.exp(policy_log_probs - old_log_probs)
+    ratio_clipped = torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
+    normal_loss = ratio * advantages
+    clip_loss = ratio_clipped * advantages
+    loss = -torch.min(normal_loss, clip_loss)
+    assert loss.shape == (batch_size, seq_len), "Loss shape mismatch"
+    clip_count = torch.abs(loss - clip_loss) < 1e-5
+    meta_info = {"clip_fraction": clip_count.float().mean()}
+    return loss, meta_info
