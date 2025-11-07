@@ -385,7 +385,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             print_and_log("Clearing vLLM from memory...")
             gc.collect()
         
-        tokenized_data = tokenize_to_tensor(rollout_prompts, rollout_ground_truths, tokenizer)
+        tokenized_data = tokenize_to_tensor(rollout_prompts, rollout_responses, tokenizer)
         input_ids = tokenized_data["input_ids"].to(train_device)
         response_mask = tokenized_data["response_mask"].to(train_device)
         labels = tokenized_data["labels"].to(train_device)
