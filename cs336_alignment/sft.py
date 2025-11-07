@@ -155,16 +155,19 @@ def train_sft(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     resp_mask: torch.Tensor,
+    optimizer: torch.optim.Optimizer | None = None,
     eval_function: Callable[[PreTrainedModel], None] | None = None,
     print_entropy: bool = False,
+    use_lr_scheduler: bool = True,
 ):
     print_and_log("-" * 80)
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
-    optimizer = torch.optim.AdamW(
-        llm.parameters(), lr=sft_config.learning_rate, fused=True
-    )
+    if optimizer is None:
+        optimizer = torch.optim.AdamW(
+            llm.parameters(), lr=sft_config.learning_rate, fused=True
+        )
     micro_batch_size = sft_config.micro_batch_size
 
     get_data_batch_fn = lambda micro_iter, micro_batch_size: get_data_batch(
@@ -195,10 +198,13 @@ def train_sft(
         print_and_log(f"Evaluation interval (in steps): {eval_interval}")
 
     start_time = time.time()
-    warmup_steps = int(0.02 * training_steps)
-    lr_scheduler = get_cosine_schedule_with_warmup(
-        optimizer, warmup_steps, training_steps
-    )
+    if use_lr_scheduler:
+        warmup_steps = int(0.02 * training_steps)
+        lr_scheduler = get_cosine_schedule_with_warmup(
+            optimizer, warmup_steps, training_steps
+        )
+    else:
+        lr_scheduler = None
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
         total_loss, total_entropy = do_grad_accumulate(
             train_device=train_device,
@@ -218,9 +224,10 @@ def train_sft(
                 f"GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
             )
 
-        current_lr = lr_scheduler.get_last_lr()[0]
+        current_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler else sft_config.learning_rate
         optimizer.step()
-        lr_scheduler.step()
+        if lr_scheduler:
+            lr_scheduler.step()
         optimizer.zero_grad()
 
         print_and_log(

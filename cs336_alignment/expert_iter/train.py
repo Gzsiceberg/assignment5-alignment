@@ -329,6 +329,15 @@ if __name__ == "__main__":
             )
             llm.train()  # type: ignore
 
+        if expert_iter_config.global_optimization:
+            assert llm is not None
+            optimizer = torch.optim.AdamW(
+                llm.parameters(), lr=sft_config.learning_rate, fused=True,
+                betas=(0.9, 0.95)
+            )
+        else:
+            optimizer = None
+
         train_sft(
             sft_config,
             train_device,
@@ -337,6 +346,8 @@ if __name__ == "__main__":
             labels=labels,
             resp_mask=response_mask,
             print_entropy=True,
+            optimizer=optimizer,
+            use_lr_scheduler=not expert_iter_config.global_optimization,
         )
 
         if llm is not None:

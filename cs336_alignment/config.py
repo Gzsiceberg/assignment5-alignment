@@ -33,6 +33,7 @@ class ExpertIterConfig(BaseModel):
     n_ei_steps: int = 5
     use_all_positive: bool = False
     do_rollout: bool = True
+    global_optimization: bool = False
 
 
 def load_config_from_file(config_path: str) -> dict:

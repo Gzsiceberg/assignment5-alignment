@@ -192,6 +192,7 @@ def train_pg(
     rl_config: RLConfig,
     train_device: str,
     llm: PreTrainedModel,
+    optimizer: torch.optim.Optimizer,
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     resp_mask: torch.Tensor,
@@ -203,13 +204,6 @@ def train_pg(
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
-    optimizer = torch.optim.AdamW(
-        llm.parameters(),
-        lr=sft_config.learning_rate,
-        fused=True,
-        weight_decay=0,
-        betas=(0.9, 0.95),
-    )
     micro_batch_size = sft_config.micro_batch_size
 
     assert sample_count == micro_batch_size * gradient_accumulation_steps, \
@@ -327,6 +321,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
     os.makedirs(output_dir, exist_ok=True)
     tokenizer.save_pretrained(output_dir)
     rollout_batch_size = rl_config.rollout_batch_size
+
     for step in (pbar:= trange(rl_config.steps, desc="GRPO Overall Steps")):
         is_last_step = (step + 1) == rl_config.steps
         print_and_log(f"GRPO Overall Step {step+1}/{rl_config.steps} starting...")
@@ -403,6 +398,14 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             )
             llm.train()  # type: ignore
 
+        assert llm is not None, "LLM should be initialized by this point"
+        optimizer = torch.optim.AdamW(
+            llm.parameters(),
+            lr=sft_config.learning_rate,
+            fused=True,
+            weight_decay=0,
+            betas=(0.9, 0.95),
+        )
         old_log_probs = None
         if rl_config.loss_type == "grpo_clip":
             assert llm is not None, "LLM must be initialized for GRPO-CLIP"
@@ -415,6 +418,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             rl_config=rl_config,
             train_device=train_device,
             llm=llm,  # type: ignore
+            optimizer=optimizer,
             input_ids=input_ids,
             labels=labels,
             resp_mask=response_mask,
