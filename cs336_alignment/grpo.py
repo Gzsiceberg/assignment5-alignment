@@ -51,11 +51,17 @@ def compute_group_normalized_rewards(
         len(rollout_responses) == prompt_size * group_size
     ), "Mismatch in total responses and group size"
     rewards = []
+    format_rewards = []
     for resp, gt in zip(rollout_responses, repeated_ground_truths):
         assert resp is not None, "Response should not be None"
         assert gt is not None, "Ground truth should not be None"
         reward_dict = reward_fn(resp, gt)
         rewards.append(reward_dict["reward"])
+        format_rewards.append(reward_dict.get("format_reward", 0.0))
+
+    mean_rewards = sum(rewards) / len(rewards)
+    mean_format_rewards = sum(format_rewards) / len(format_rewards)
+    meta_info = {"mean_reward": mean_rewards, "mean_format_reward": mean_format_rewards}
     rewards = torch.tensor(rewards, dtype=torch.float32).view(prompt_size, group_size)
     mean_rewards = rewards.mean(dim=1, keepdim=True)
     advantages = rewards - mean_rewards
@@ -65,7 +71,7 @@ def compute_group_normalized_rewards(
     return (
         advantages.view(-1),
         rewards.view(-1),
-        {"mean_reward": mean_rewards.mean().item()},
+        meta_info,
     )
 
 
@@ -245,10 +251,13 @@ def train_pg(
         )
 
         if sft_config.clip_gradients > 0.0:
-            # implement gradient clipping if needed
-            torch.nn.utils.clip_grad_norm_(
+            grad_norm = torch.nn.utils.clip_grad_norm_(
                 llm.parameters(), max_norm=sft_config.clip_gradients
             )
+            print_and_log(
+                f"GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
+            )
+
 
         optimizer.step()
         optimizer.zero_grad()
@@ -366,7 +375,8 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
         advantages = advantages.to(train_device)
         raw_rewards = raw_rewards.to(train_device)
         mean_reward = reward_meta_info["mean_reward"]
-        print_and_log(f"Mean Reward for this rollout: {mean_reward:.4f}")
+        format_reward = reward_meta_info["mean_format_reward"]
+        print_and_log(f"MeanReward={mean_reward:.4f} FormatReward={format_reward:.4f}")
 
         # Free up vLLM memory if on the same device
         if is_sample_device:

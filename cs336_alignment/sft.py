@@ -211,9 +211,11 @@ def train_sft(
         )
 
         if sft_config.clip_gradients > 0.0:
-            # implement gradient clipping if needed
-            torch.nn.utils.clip_grad_norm_(
+            grad_norm = torch.nn.utils.clip_grad_norm_(
                 llm.parameters(), max_norm=sft_config.clip_gradients
+            )
+            print_and_log(
+                f"GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
             )
 
         current_lr = lr_scheduler.get_last_lr()[0]
