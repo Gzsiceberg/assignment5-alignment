@@ -145,7 +145,7 @@ def train_sft(
                         token_entropy = results["token_entropy"]
                         assert token_entropy.shape == (micro_batch_size, sample_content_length)
                         avg_token_entropy = masked_mean(token_entropy, batch_resp_mask, dim=1, protect_zero_division=True).mean()
-                        total_entropy += avg_token_entropy.detach() / gradient_accumulation_steps
+                        total_entropy += avg_token_entropy / gradient_accumulation_steps
                     
                 assert log_probs.shape == (micro_batch_size, sample_content_length)
                 loss, _ = sft_microbatch_train_step(
