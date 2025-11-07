@@ -18,6 +18,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel # 
 from cs336_alignment.vllm_util import init_vllm  # type: ignore
 from cs336_alignment.config import load_config_from_file
 from einops import rearrange, einsum
+from cs336_alignment.sft_helper import get_response_log_probs
 import typer
 
 
@@ -86,6 +87,8 @@ def compute_grpo_clip_loss(
     cliprange: float,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     batch_size, seq_len = policy_log_probs.shape
+    if advantages.ndim == 1:
+        advantages = rearrange(advantages, "b -> b 1")
     assert advantages.shape == (batch_size, 1), "Advantages shape mismatch"
     ratio = torch.exp(policy_log_probs - old_log_probs)
     ratio_clipped = torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
@@ -390,6 +393,13 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             )
             llm.train()  # type: ignore
 
+        old_log_probs = None
+        if rl_config.loss_type == "grpo_clip":
+            assert llm is not None, "LLM must be initialized for GRPO-CLIP"
+            with torch.no_grad(), torch.autocast(device_type=train_device, dtype=torch.bfloat16):
+                old_log_probs = get_log_probs(sft_config, llm, rollout_batch_size, input_ids, response_mask, labels)
+            print_and_log("Computed old log probabilities for GRPO-CLIP.")
+
         train_pg(
             sft_config=sft_config,
             rl_config=rl_config,
@@ -400,12 +410,36 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             resp_mask=response_mask,
             raw_rewards=raw_rewards,
             advantages=advantages,
-            old_log_probs=None,
+            old_log_probs=old_log_probs,
         )
 
         if llm is not None and ((step + 1) % 10 == 0 or is_last_step):
             print_and_log(f"Saving model checkpoint at step {step+1}...")
             llm.save_pretrained(output_dir)
+
+def get_log_probs(sft_config: SftConfig, llm: PreTrainedModel, rollout_batch_size: int, 
+                   input_ids: torch.Tensor, response_mask: torch.Tensor, labels: torch.Tensor):
+    old_log_probs = torch.empty((rollout_batch_size, input_ids.shape[1]), dtype=torch.float32)
+    micro_batch_size = sft_config.micro_batch_size
+    for micro_iter in tqdm(range(sft_config.gradient_accumulation_steps), desc="Computing old log probs", leave=False):
+        batch_input_ids, batch_labels, batch_resp_mask = get_data_batch(
+                        micro_iter,
+                        micro_batch_size,
+                        input_ids,
+                        labels,
+                        response_mask,
+                    )
+        results = get_response_log_probs(
+                        llm,
+                        batch_input_ids,
+                        batch_labels,
+                        False
+                    )
+        start_idx = micro_iter * micro_batch_size
+        end_idx = start_idx + micro_batch_size
+        assert end_idx <= rollout_batch_size, "Old log probs index out of range"
+        old_log_probs[start_idx:end_idx, :] = results["log_probs"]
+    return old_log_probs
 
 
 if __name__ == "__main__":
