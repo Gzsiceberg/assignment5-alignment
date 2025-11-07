@@ -36,3 +36,10 @@ def compute_group_normalized_rewards(
         rewards.view(-1),
         {"mean_reward": mean_rewards.mean().item()},
     )
+
+
+def compute_naive_policy_gradient_loss(
+    raw_rewards_or_advantages: torch.Tensor,
+    policy_log_probs: torch.Tensor,
+) -> torch.Tensor:
+    return -policy_log_probs * raw_rewards_or_advantages
