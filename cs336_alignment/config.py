@@ -18,8 +18,13 @@ class SftConfig(BaseModel):
     clip_gradients: float = 1.0
 
 class RLConfig(BaseModel):
+    steps: int = 200
     loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"] = "reinforce_with_baseline"
     cliprange: float = 0.2
+    rollout_batch_size: int = 256
+    group_size: int = 8
+    use_std_normalization: bool = True
+    advantage_eps: float = 1e-6
 
 
 class ExpertIterConfig(BaseModel):
