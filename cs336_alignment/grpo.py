@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Callable
+from typing import Callable, Literal
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
 
@@ -61,4 +61,38 @@ def compute_grpo_clip_loss(
     assert loss.shape == (batch_size, seq_len), "Loss shape mismatch"
     clip_count = torch.abs(loss - clip_loss) < 1e-5
     meta_info = {"clip_fraction": clip_count.float().mean()}
+    return loss, meta_info
+
+
+def compute_policy_gradient_loss(
+    policy_log_probs: torch.Tensor,
+    loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"],
+    raw_rewards: torch.Tensor | None = None,
+    advantages: torch.Tensor | None = None,
+    old_log_probs: torch.Tensor | None = None,
+    cliprange: float | None = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    batch_size, seq_len = policy_log_probs.shape
+    meta_info = {}
+    match loss_type:
+        case "no_baseline":
+            assert raw_rewards is not None, "Raw rewards required for no_baseline loss"
+            loss = compute_naive_policy_gradient_loss(raw_rewards, policy_log_probs)
+        case "reinforce_with_baseline":
+            assert (
+                advantages is not None
+            ), "Advantages required for reinforce_with_baseline loss"
+            loss = compute_naive_policy_gradient_loss(advantages, policy_log_probs)
+        case "grpo_clip":
+            assert advantages is not None, "Advantages required for grpo_clip loss"
+            assert (
+                old_log_probs is not None
+            ), "Old log probs required for grpo_clip loss"
+            assert cliprange is not None, "Cliprange required for grpo_clip loss"
+            loss, meta_info_clip = compute_grpo_clip_loss(
+                advantages, policy_log_probs, old_log_probs, cliprange
+            )
+            meta_info.update(meta_info_clip)
+
+    assert loss.shape == (batch_size, seq_len), "Final loss shape mismatch"
     return loss, meta_info
