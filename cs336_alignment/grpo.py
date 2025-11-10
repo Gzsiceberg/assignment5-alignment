@@ -551,9 +551,12 @@ def get_log_probs(
         desc="Computing old log probs",
         leave=False,
     ):
+        sample_idx = np.arange(
+            start=micro_iter * micro_batch_size,
+            stop=(micro_iter + 1) * micro_batch_size,
+        )
         batch_input_ids, batch_labels, batch_resp_mask = get_data_batch(
-            micro_iter,
-            micro_batch_size,
+            sample_idx,
             input_ids,
             labels,
             response_mask,
