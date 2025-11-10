@@ -307,7 +307,7 @@ def train_pg(
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 llm.parameters(), max_norm=sft_config.clip_gradients
             )
-            st_log += f" GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
+            st_log += f" GradNorm={grad_norm:.4f}"
 
         optimizer.step()
         optimizer.zero_grad()
