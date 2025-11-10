@@ -207,13 +207,9 @@ def get_grpo_data_batch(
     advantages: torch.Tensor | None,
     old_log_probs: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
-    batch_raw_rewards = (
-        raw_rewards[indices] if raw_rewards is not None else None
-    )
+    batch_raw_rewards = raw_rewards[indices] if raw_rewards is not None else None
     batch_advantages = advantages[indices] if advantages is not None else None
-    batch_old_log_probs = (
-        old_log_probs[indices] if old_log_probs is not None else None
-    )
+    batch_old_log_probs = old_log_probs[indices] if old_log_probs is not None else None
     return batch_raw_rewards, batch_advantages, batch_old_log_probs
 
 
@@ -247,6 +243,7 @@ def train_pg(
         if sample_count == micro_batch_size * gradient_accumulation_steps:
             start_idx = micro_iter * micro_batch_size
             end_idx = start_idx + micro_batch_size
+            assert end_idx <= sample_count, "Sample index out of range"
             sample_idx = np.arange(start=start_idx, stop=end_idx)
         else:
             sample_idx = np.random.choice(
