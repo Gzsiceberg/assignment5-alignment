@@ -12,10 +12,11 @@ from vllm import LLM, SamplingParams
 from cs336_alignment.config import RLConfig, SftConfig
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 from cs336_alignment.math_baseline import (
+    evaluate_vllm,
     get_evaluation_sample_params,
     get_evaluation_samples,
 )
-from cs336_alignment.sft import cleanup, do_grad_accumulate, vllm_evaluate
+from cs336_alignment.sft import cleanup, do_grad_accumulate
 from cs336_alignment.sft_helper import masked_normalize, masked_mean, tokenize_to_tensor
 from cs336_alignment.logger import print_and_log, setup_logging
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  # type: ignore
@@ -422,7 +423,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
                 load_policy_into_vllm_instance(llm, vllm_model)  # # type: ignore
 
         if rl_config.eval_interval > 0 and ((step + 1) % rl_config.eval_interval == 0 or is_last_step):
-            vllm_evaluate(None, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
+            evaluate_vllm(vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
 
         # Create rollout lists efficiently using helper function
         rollout_prompts = repeat_items_by_group_size(
