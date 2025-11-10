@@ -1,0 +1,15 @@
+SftConfig:
+  num_epochs: 1
+  learning_rate: 5e-5
+  gradient_accumulation_steps: 64
+  micro_batch_size: 4
+  max_examples: 1024
+
+RLConfig:
+  steps: 200
+  loss_type: "reinforce_with_baseline"
+  cliprange: 0.2
+  rollout_batch_size: 256
+  group_size: 8
+  advantage_eps: 1e-6
+  use_std_normalization: True
