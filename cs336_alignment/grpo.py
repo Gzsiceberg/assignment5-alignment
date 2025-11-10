@@ -1,5 +1,6 @@
 import gc
 import os
+
 os.environ["VLLM_LOGGING_LEVEL"] = "ERROR"
 import time
 import torch
@@ -10,11 +11,14 @@ from tqdm import tqdm, trange
 from vllm import LLM, SamplingParams
 from cs336_alignment.config import RLConfig, SftConfig
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
-from cs336_alignment.math_baseline import get_evaluation_sample_params, get_evaluation_samples
+from cs336_alignment.math_baseline import (
+    get_evaluation_sample_params,
+    get_evaluation_samples,
+)
 from cs336_alignment.sft import cleanup, do_grad_accumulate, vllm_evaluate
 from cs336_alignment.sft_helper import masked_normalize, masked_mean, tokenize_to_tensor
 from cs336_alignment.logger import print_and_log, setup_logging
-from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel # type: ignore
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  # type: ignore
 from cs336_alignment.vllm_util import init_vllm  # type: ignore
 from cs336_alignment.config import load_config_from_file
 from einops import rearrange, einsum
@@ -24,11 +28,11 @@ import typer
 
 def repeat_items_by_group_size(items: list, group_size: int) -> list:
     """Efficiently repeat each item in the list by group_size times.
-    
+
     Args:
         items: List of items to repeat
         group_size: Number of times to repeat each item
-    
+
     Returns:
         List with each item repeated group_size times in sequence
     """
@@ -80,9 +84,7 @@ def compute_naive_policy_gradient_loss(
     policy_log_probs: torch.Tensor,
 ) -> torch.Tensor:
     if raw_rewards_or_advantages.ndim == 1:
-        raw_rewards_or_advantages = rearrange(
-            raw_rewards_or_advantages, "b -> b 1"
-        )
+        raw_rewards_or_advantages = rearrange(raw_rewards_or_advantages, "b -> b 1")
     return -policy_log_probs * raw_rewards_or_advantages
 
 
@@ -116,9 +118,15 @@ def compute_policy_gradient_loss(
     cliprange: float | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     batch_size, seq_len = policy_log_probs.shape
-    assert raw_rewards is None or raw_rewards.shape[0] == batch_size, "Raw rewards shape mismatch"
-    assert advantages is None or advantages.shape[0] == batch_size, "Advantages shape mismatch"
-    assert old_log_probs is None or old_log_probs.shape == policy_log_probs.shape, "Old log probs shape mismatch"
+    assert (
+        raw_rewards is None or raw_rewards.shape[0] == batch_size
+    ), "Raw rewards shape mismatch"
+    assert (
+        advantages is None or advantages.shape[0] == batch_size
+    ), "Advantages shape mismatch"
+    assert (
+        old_log_probs is None or old_log_probs.shape == policy_log_probs.shape
+    ), "Old log probs shape mismatch"
 
     meta_info = {}
     match loss_type:
@@ -141,7 +149,10 @@ def compute_policy_gradient_loss(
             )
             meta_info.update(meta_info_clip)
 
-    assert loss.shape == (batch_size, seq_len), f"loss shape mismatch: expected {(batch_size, seq_len)}, got {loss.shape}"
+    assert loss.shape == (
+        batch_size,
+        seq_len,
+    ), f"loss shape mismatch: expected {(batch_size, seq_len)}, got {loss.shape}"
     return loss, meta_info
 
 
@@ -187,6 +198,26 @@ def get_data_batch(
     return batch_input_ids, batch_labels, batch_resp_mask
 
 
+def get_grpo_data_batch(
+    micro_iter: int,
+    micro_batch_size: int,
+    raw_rewards: torch.Tensor | None,
+    advantages: torch.Tensor | None,
+    old_log_probs: torch.Tensor | None = None,
+) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    start_idx = micro_iter * micro_batch_size
+    end_idx = start_idx + micro_batch_size
+    assert end_idx <= raw_rewards.shape[0], "Batch index out of range"
+    batch_raw_rewards = (
+        raw_rewards[start_idx:end_idx] if raw_rewards is not None else None
+    )
+    batch_advantages = advantages[start_idx:end_idx] if advantages is not None else None
+    batch_old_log_probs = (
+        old_log_probs[start_idx:end_idx] if old_log_probs is not None else None
+    )
+    return batch_raw_rewards, batch_advantages, batch_old_log_probs
+
+
 def train_pg(
     sft_config: SftConfig,
     rl_config: RLConfig,
@@ -206,25 +237,47 @@ def train_pg(
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     micro_batch_size = sft_config.micro_batch_size
 
-    assert sample_count == micro_batch_size * gradient_accumulation_steps, \
-        "Sample count must equal micro_batch_size * gradient_accumulation_steps"
+    assert (
+        sample_count == micro_batch_size * gradient_accumulation_steps
+    ), "Sample count must equal micro_batch_size * gradient_accumulation_steps"
 
-    get_data_batch_fn = lambda micro_iter, micro_batch_size: get_data_batch(
-        micro_iter, micro_batch_size, input_ids, labels, resp_mask
-    )
+    def get_data_batch_fn(
+        micro_iter: int, micro_batch_size: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return get_data_batch(micro_iter, micro_batch_size, input_ids, labels, resp_mask)
 
-    micro_batch_train_step_fn = lambda micro_iter, micro_batch_size, \
-        policy_log_probs, response_mask, gradient_accumulation_steps: \
-            grpo_microbatch_train_step(
-        policy_log_probs,
-        response_mask,
-        gradient_accumulation_steps,
-        rl_config.loss_type,
-        raw_rewards[micro_iter * micro_batch_size:(micro_iter + 1) * micro_batch_size] if raw_rewards is not None else None,
-        advantages[micro_iter * micro_batch_size:(micro_iter + 1) * micro_batch_size] if advantages is not None else None,
-        old_log_probs[micro_iter * micro_batch_size:(micro_iter + 1) * micro_batch_size] if old_log_probs is not None else None,
-        rl_config.cliprange,
-    )
+    def micro_batch_train_step_fn(
+        micro_iter: int,
+        micro_batch_size: int,
+        policy_log_probs: torch.Tensor,
+        response_mask: torch.Tensor,
+        gradient_accumulation_steps: int,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        raw_rewards_batch, advantages_batch, old_log_probs_batch = get_grpo_data_batch(
+            micro_iter, micro_batch_size, raw_rewards, advantages, old_log_probs
+        )
+        if raw_rewards_batch is not None:
+            assert (
+                raw_rewards_batch.shape[0] == micro_batch_size
+            ), "Raw rewards batch size mismatch"
+        if advantages_batch is not None:
+            assert (
+                advantages_batch.shape[0] == micro_batch_size
+            ), "Advantages batch size mismatch"
+        if old_log_probs_batch is not None:
+            assert (
+                old_log_probs_batch.shape[0] == micro_batch_size
+            ), "Old log probs batch size mismatch"
+        return grpo_microbatch_train_step(
+            policy_log_probs,
+            response_mask,
+            gradient_accumulation_steps,
+            rl_config.loss_type,
+            raw_rewards_batch,
+            advantages_batch,
+            old_log_probs_batch,
+            rl_config.cliprange,
+        )
 
     iter_batch_size = micro_batch_size * gradient_accumulation_steps
     training_steps = sft_config.num_epochs * sample_count // iter_batch_size
@@ -252,7 +305,6 @@ def train_pg(
                 f"GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
             )
 
-
         optimizer.step()
         optimizer.zero_grad()
 
@@ -267,11 +319,15 @@ def train_pg(
     )
 
 
-def rollout(sampling_params: SamplingParams, vllm: LLM, prompts: list[str]) -> list[str]:
+def rollout(
+    sampling_params: SamplingParams, vllm: LLM, prompts: list[str]
+) -> list[str]:
     n = sampling_params.n
     outputs = vllm.generate(prompts, sampling_params=sampling_params)
     rollout_responses = []
-    for output in tqdm(outputs, total=len(prompts), desc="Processing generated outputs", leave=False):
+    for output in tqdm(
+        outputs, total=len(prompts), desc="Processing generated outputs", leave=False
+    ):
         assert len(output.outputs) == n, "Output count mismatch in rollout"
         for resp in output.outputs:
             resp_text = resp.text
@@ -288,25 +344,38 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
 
     model_id = sft_config.model_id
     sample_question_size = rl_config.rollout_batch_size // rl_config.group_size
-    assert rl_config.rollout_batch_size % rl_config.group_size == 0, "Rollout batch size must be divisible by group size"
-    if rl_config.rollout_batch_size != sft_config.micro_batch_size * sft_config.gradient_accumulation_steps:
+    assert (
+        rl_config.rollout_batch_size % rl_config.group_size == 0
+    ), "Rollout batch size must be divisible by group size"
+    if (
+        rl_config.rollout_batch_size
+        != sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
+    ):
         print_and_log(
             f"Warning: Rollout batch size {rl_config.rollout_batch_size} does not equal micro_batch_size * gradient_accumulation_steps ({sft_config.micro_batch_size} * {sft_config.gradient_accumulation_steps} = {sft_config.micro_batch_size * sft_config.gradient_accumulation_steps}). This may lead to inefficient training."
         )
-        sft_config.micro_batch_size = rl_config.rollout_batch_size // sft_config.gradient_accumulation_steps
-    assert rl_config.rollout_batch_size == sft_config.micro_batch_size * sft_config.gradient_accumulation_steps, \
-        "Rollout batch size must equal micro_batch_size * gradient_accumulation_steps"
-    
+        sft_config.micro_batch_size = (
+            rl_config.rollout_batch_size // sft_config.gradient_accumulation_steps
+        )
+    assert (
+        rl_config.rollout_batch_size
+        == sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
+    ), "Rollout batch size must equal micro_batch_size * gradient_accumulation_steps"
+
     print_and_log(f"sft_config: {sft_config}")
     print_and_log(f"rl_config: {rl_config}")
 
     tokenizer = AutoTokenizer.from_pretrained(f"models/{model_id}")
 
     prompts, ground_truths = get_evaluation_samples(sft_config.max_examples, 0)
-    sampling_params = get_evaluation_sample_params(rl_config.group_size, 2048 - 512 - 256)
+    sampling_params = get_evaluation_sample_params(
+        rl_config.group_size, 2048 - 512 - 256
+    )
 
     eval_prompts, eval_ground_truths = get_evaluation_samples(512, 4096)
-    eval_sampling_params: SamplingParams = get_evaluation_sample_params(1, 2048 - 512 - 256)
+    eval_sampling_params: SamplingParams = get_evaluation_sample_params(
+        1, 2048 - 512 - 256
+    )
 
     output_model = base_name
     gpus_count = torch.cuda.device_count()
@@ -314,6 +383,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
     vllm = None
     train_device = "cuda:0"
     llm: PreTrainedModel | None = None
+    optimizer: torch.optim.Optimizer | None = None
     question_ids = np.array(range(len(prompts)))
     is_sample_device = vllm_device == train_device
     output_dir = f"models/{output_model}"
@@ -322,7 +392,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
     tokenizer.save_pretrained(output_dir)
     rollout_batch_size = rl_config.rollout_batch_size
 
-    for step in (pbar:= trange(rl_config.steps, desc="GRPO Overall Steps")):
+    for step in (pbar := trange(rl_config.steps, desc="GRPO Overall Steps")):
         is_last_step = (step + 1) == rl_config.steps
         print_and_log(f"GRPO Overall Step {step+1}/{rl_config.steps} starting...")
         sample_question_ids = np.random.choice(
@@ -350,15 +420,25 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             vllm_evaluate(
                 llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params
             )
-        
+
         # Create rollout lists efficiently using helper function
-        rollout_prompts = repeat_items_by_group_size(sample_prompts, rl_config.group_size)
-        rollout_ground_truths = repeat_items_by_group_size(sample_ground_truths, rl_config.group_size)
-        assert len(rollout_ground_truths) == rollout_batch_size, f"Expected {rollout_batch_size} rollout ground truths, got {len(rollout_ground_truths)}"
-        assert len(rollout_prompts) == rollout_batch_size, f"Expected {rollout_batch_size} rollout prompts, got {len(rollout_prompts)}"
+        rollout_prompts = repeat_items_by_group_size(
+            sample_prompts, rl_config.group_size
+        )
+        rollout_ground_truths = repeat_items_by_group_size(
+            sample_ground_truths, rl_config.group_size
+        )
+        assert (
+            len(rollout_ground_truths) == rollout_batch_size
+        ), f"Expected {rollout_batch_size} rollout ground truths, got {len(rollout_ground_truths)}"
+        assert (
+            len(rollout_prompts) == rollout_batch_size
+        ), f"Expected {rollout_batch_size} rollout prompts, got {len(rollout_prompts)}"
 
         rollout_responses = rollout(sampling_params, vllm, sample_prompts)
-        assert len(rollout_responses) == rollout_batch_size, f"Expected {rollout_batch_size} rollout responses, got {len(rollout_responses)}"
+        assert (
+            len(rollout_responses) == rollout_batch_size
+        ), f"Expected {rollout_batch_size} rollout responses, got {len(rollout_responses)}"
 
         advantages, raw_rewards, reward_meta_info = compute_group_normalized_rewards(
             rollout_responses,
@@ -379,14 +459,15 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             vllm = None
             print_and_log("Clearing vLLM from memory...")
             gc.collect()
-        
-        tokenized_data = tokenize_to_tensor(rollout_prompts, rollout_responses, tokenizer)
+
+        tokenized_data = tokenize_to_tensor(
+            rollout_prompts, rollout_responses, tokenizer
+        )
         input_ids = tokenized_data["input_ids"].to(train_device)
         response_mask = tokenized_data["response_mask"].to(train_device)
         labels = tokenized_data["labels"].to(train_device)
         print_and_log("Tokenization complete.")
         print_and_log(f"Input IDs shape: {input_ids.shape}")
-
 
         if llm is None:
             print_and_log("Loading model for SFT training...")
@@ -398,19 +479,31 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             )
             llm.train()  # type: ignore
 
-        assert llm is not None, "LLM should be initialized by this point"
-        optimizer = torch.optim.AdamW(
-            llm.parameters(),
-            lr=sft_config.learning_rate,
-            fused=True,
-            weight_decay=0,
-            betas=(0.9, 0.95),
-        )
+        if optimizer is None:
+            assert llm is not None, "LLM should be initialized by this point"
+            optimizer = torch.optim.AdamW(
+                llm.parameters(),
+                lr=sft_config.learning_rate,
+                fused=True,
+                weight_decay=0,
+                betas=(0.9, 0.95),
+            )
+
         old_log_probs = None
         if rl_config.loss_type == "grpo_clip":
             assert llm is not None, "LLM must be initialized for GRPO-CLIP"
-            with torch.no_grad(), torch.autocast(device_type=train_device, dtype=torch.bfloat16):
-                old_log_probs = get_log_probs(sft_config, llm, rollout_batch_size, input_ids, response_mask, labels)
+            with (
+                torch.no_grad(),
+                torch.autocast(device_type=train_device, dtype=torch.bfloat16),
+            ):
+                old_log_probs = get_log_probs(
+                    sft_config,
+                    llm,
+                    rollout_batch_size,
+                    input_ids,
+                    response_mask,
+                    labels,
+                )
             print_and_log("Computed old log probabilities for GRPO-CLIP.")
 
         train_pg(
@@ -431,24 +524,34 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             print_and_log(f"Saving model checkpoint at step {step+1}...")
             llm.save_pretrained(output_dir)
 
-def get_log_probs(sft_config: SftConfig, llm: PreTrainedModel, rollout_batch_size: int, 
-                   input_ids: torch.Tensor, response_mask: torch.Tensor, labels: torch.Tensor):
-    old_log_probs = torch.empty((rollout_batch_size, input_ids.shape[1]), dtype=torch.float32, device=input_ids.device)
+
+def get_log_probs(
+    sft_config: SftConfig,
+    llm: PreTrainedModel,
+    rollout_batch_size: int,
+    input_ids: torch.Tensor,
+    response_mask: torch.Tensor,
+    labels: torch.Tensor,
+):
+    old_log_probs = torch.empty(
+        (rollout_batch_size, input_ids.shape[1]),
+        dtype=torch.float32,
+        device=input_ids.device,
+    )
     micro_batch_size = sft_config.micro_batch_size
-    for micro_iter in tqdm(range(sft_config.gradient_accumulation_steps), desc="Computing old log probs", leave=False):
+    for micro_iter in tqdm(
+        range(sft_config.gradient_accumulation_steps),
+        desc="Computing old log probs",
+        leave=False,
+    ):
         batch_input_ids, batch_labels, batch_resp_mask = get_data_batch(
-                        micro_iter,
-                        micro_batch_size,
-                        input_ids,
-                        labels,
-                        response_mask,
-                    )
-        results = get_response_log_probs(
-                        llm,
-                        batch_input_ids,
-                        batch_labels,
-                        False
-                    )
+            micro_iter,
+            micro_batch_size,
+            input_ids,
+            labels,
+            response_mask,
+        )
+        results = get_response_log_probs(llm, batch_input_ids, batch_labels, False)
         start_idx = micro_iter * micro_batch_size
         end_idx = start_idx + micro_batch_size
         assert end_idx <= rollout_batch_size, "Old log probs index out of range"
