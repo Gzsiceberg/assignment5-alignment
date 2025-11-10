@@ -451,7 +451,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
         raw_rewards = raw_rewards.to(train_device)
         mean_reward = reward_meta_info["mean_reward"]
         format_reward = reward_meta_info["mean_format_reward"]
-        print_and_log(f"MeanReward={mean_reward:.4f} FormatReward={format_reward:.4f}")
+        print_and_log(f"MeanReward={mean_reward:.4f} FormatReward={format_reward:.4f} AdvantageMean={advantages.mean().item():.4f} AdvStd={advantages.std().item():.4f}")
 
         # Free up vLLM memory if on the same device
         if is_sample_device:
