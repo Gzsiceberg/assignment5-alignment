@@ -274,15 +274,16 @@ if __name__ == "__main__":
                 seed=42,
                 gpu_memory_utilization=0.85,
             )
-            if llm is not None:
-                print_and_log("Loading policy weights into vLLM model...")
-                load_policy_into_vllm_instance(llm, vllm)
+        if llm is not None:
+            assert vllm is not None, "vLLM should be initialized"
+            print_and_log("Loading policy weights into vLLM model...")
+            load_policy_into_vllm_instance(llm, vllm)
 
-                print_and_log("evaluating vLLM on sample sets...")
-                evaluate_vllm(vllm, sample_prompts, sample_ground_truths, eval_sampling_params)
+            print_and_log("evaluating vLLM on sample sets...")
+            evaluate_vllm(vllm, sample_prompts, sample_ground_truths, eval_sampling_params)
 
-                print_and_log("evaluating vLLM on eval sets...")
-                evaluate_vllm(vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
+            print_and_log("evaluating vLLM on eval sets...")
+            evaluate_vllm(vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
 
         sft_prompts, sft_responses = expert_iter(
             expert_iter_config=expert_iter_config,
