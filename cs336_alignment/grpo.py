@@ -413,7 +413,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
                 model_id=f"models/{model_id}",
                 device=vllm_device,
                 seed=42,
-                gpu_memory_utilization=0.85,
+                gpu_memory_utilization=0.9 if not is_sample_device else 0.7, 
             )
 
         if llm is not None and ((step + 1) % 10 == 0 or is_last_step):
