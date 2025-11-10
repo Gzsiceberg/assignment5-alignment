@@ -539,9 +539,9 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             old_log_probs=old_log_probs,
         )
 
-        if llm is not None and rl_config.eval_interval > 0 and ((step + 1) % rl_config.eval_interval == 0 or is_last_step):
-            print_and_log(f"Saving model checkpoint at step {step+1}...")
-            llm.save_pretrained(output_dir)
+    assert llm is not None, "LLM should be initialized before saving"
+    print_and_log(f"Saving model checkpoint ...")
+    llm.save_pretrained(output_dir)
 
 
 def get_log_probs(
