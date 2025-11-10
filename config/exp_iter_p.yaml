@@ -1,11 +1,11 @@
 SftConfig:
-  num_epochs: 3
-  learning_rate: 1e-5
+  num_epochs: 20
+  learning_rate: 3e-5
   gradient_accumulation_steps: 64
   micro_batch_size: 4
 
 ExpertIterConfig:
-  question_batch_size: 256
+  question_batch_size: 512
   sample_batch_size: 8
   n_ei_steps: 10
   use_all_positive: True
