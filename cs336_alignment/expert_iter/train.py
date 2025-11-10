@@ -6,6 +6,7 @@ import gc
 from vllm.sampling_params import SamplingParams
 from vllm import LLM
 from cs336_alignment.math_baseline import (
+    evaluate_vllm,
     get_evaluation_sample_params,
     get_evaluation_samples,
 )
@@ -19,7 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel  #
 import torch
 import random
 from cs336_alignment.sft_helper import tokenize_to_tensor
-from cs336_alignment.sft import train_sft, vllm_evaluate
+from cs336_alignment.sft import train_sft
 from cs336_alignment.config import SftConfig, ExpertIterConfig, load_config_from_file
 from cs336_alignment.logger import setup_logging, print_and_log
 from cs336_alignment.extract import preprocess_text
@@ -288,8 +289,10 @@ if __name__ == "__main__":
                 gpu_memory_utilization=0.85,
             )
             if llm is not None:
-                vllm_evaluate(
-                    llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params
+                print_and_log("Loading policy weights into vLLM model...")
+                load_policy_into_vllm_instance(llm, vllm)
+                evaluate_vllm(
+                    vllm, prompts, ground_truths, sampling_params
                 )
 
         sft_prompts, sft_responses = expert_iter(
@@ -367,5 +370,5 @@ if __name__ == "__main__":
             seed=42,
             gpu_memory_utilization=0.85,
         )
-    vllm_evaluate(None, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
+    evaluate_vllm(vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
     cleanup()

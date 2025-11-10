@@ -66,23 +66,6 @@ def cleanup():
             pass
 
 
-def vllm_evaluate(
-    llm: PreTrainedModel | None,
-    vllm_model: LLM,
-    prompts: list[str],
-    ground_truths: list[str],
-    sampling_params: SamplingParams,
-):
-    if llm is not None:
-        load_policy_into_vllm_instance(llm, vllm_model)  # # type: ignore
-    evaluate_vllm(
-        vllm_model=vllm_model,
-        prompts=prompts,
-        ground_truths=ground_truths,
-        eval_sampling_params=sampling_params,
-        dump_data=False,
-    )
-
 def get_data_batch(
     sample_count: int, micro_batch_size: int, sample_content_length: int,
     input_ids: torch.Tensor, labels: torch.Tensor, resp_mask: torch.Tensor,
@@ -310,7 +293,6 @@ if __name__ == "__main__":
     print_and_log(f"Input IDs shape: {input_ids.shape}")
     assert input_ids.shape == labels.shape == resp_mask.shape
 
-    eval_function = None
     if sft_config.eval_interval > 0 and (torch.cuda.device_count() > 1 or is_eval_only):
         sampling_params: SamplingParams = get_evaluation_sample_params()
         prompts, ground_truths = get_evaluation_samples(256, 4096)
@@ -322,12 +304,12 @@ if __name__ == "__main__":
             gpu_memory_utilization=0.85,
         )
         print_and_log("Loading policy weights into vLLM model...")
-        eval_function: Callable[[PreTrainedModel], None] | None = (
-            lambda model: vllm_evaluate(
-                model, vllm_model, prompts, ground_truths, sampling_params
+
+        def eval_function(llm: PreTrainedModel) -> None:
+            load_policy_into_vllm_instance(llm, vllm_model)
+            evaluate_vllm(
+                vllm_model, prompts, ground_truths, sampling_params
             )
-        )
-        eval_function(llm)
 
     if is_eval_only:
         print_and_log("Evaluation only mode, exiting after evaluation.")
@@ -345,7 +327,7 @@ if __name__ == "__main__":
         input_ids,
         labels,
         resp_mask,
-        eval_function=eval_function,
+        eval_function=eval_function if "eval_function" in globals() else None, # type: ignore
     )
     llm.save_pretrained(save_directory=output_dir)  # type: ignore
     tokenizer.save_pretrained(save_directory=output_dir)

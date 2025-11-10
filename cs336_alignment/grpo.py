@@ -417,11 +417,12 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
                 seed=42,
                 gpu_memory_utilization=0.9 if not is_sample_device else 0.7, 
             )
+            if llm is not None:
+                print_and_log("Loading policy into vLLM instance...")
+                load_policy_into_vllm_instance(llm, vllm_model)  # # type: ignore
 
-        if llm is not None and rl_config.eval_interval > 0 and ((step + 1) % rl_config.eval_interval == 0 or is_last_step):
-            vllm_evaluate(
-                llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params
-            )
+        if rl_config.eval_interval > 0 and ((step + 1) % rl_config.eval_interval == 0 or is_last_step):
+            vllm_evaluate(None, vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
 
         # Create rollout lists efficiently using helper function
         rollout_prompts = repeat_items_by_group_size(
@@ -443,7 +444,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
         ), f"Expected {rollout_batch_size} rollout responses, got {len(rollout_responses)}"
 
         def simple_reward_fn(ans: str, gt: str) -> dict[str, float]:
-            if len(ans) < len(gt):
+            if len(ans) < len(gt) * 0.5:
                 return {"reward": 1.0, "format_reward": 1.0}
             else:
                 return {"reward": 0.0, "format_reward": 0.0}
