@@ -419,9 +419,10 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
                 seed=42,
                 gpu_memory_utilization=0.9 if not is_sample_device else 0.7, 
             )
-            if llm is not None:
-                print_and_log("Loading policy into vLLM instance...")
-                load_policy_into_vllm_instance(llm, vllm)  # # type: ignore
+        if llm is not None:
+            assert vllm is not None, "vLLM should be initialized by this point"
+            print_and_log("Loading policy into vLLM instance...")
+            load_policy_into_vllm_instance(llm, vllm)  # # type: ignore
 
         if rl_config.eval_interval > 0 and ((step + 1) % rl_config.eval_interval == 0 or is_last_step):
             evaluate_vllm(vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
