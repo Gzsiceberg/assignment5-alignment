@@ -219,7 +219,7 @@ if __name__ == "__main__":
     sampling_params = get_evaluation_sample_params(sample_batch_size, 2048 - 512 - 256)
     tokenizer = AutoTokenizer.from_pretrained(f"models/{model_id}")
 
-    eval_sampling_params: SamplingParams = get_evaluation_sample_params(1, 2048)
+    eval_sampling_params: SamplingParams = get_evaluation_sample_params(1, 2048 - 512 - 256)
     eval_prompts, eval_ground_truths = get_evaluation_samples(256, 4096)
 
     gpus_count = torch.cuda.device_count()
@@ -247,31 +247,17 @@ if __name__ == "__main__":
 
     question_meta_infos: dict[int, QuestionMetaInfo] = {}
     for ei_step in trange(args.resume_from, n_ei_steps, desc="Expert Iteration Steps"):
-        sample_weights = []
         correct_question_total = 0
         for idx in question_ids:
             if idx in question_meta_infos:
                 meta_info = question_meta_infos[idx]
                 if meta_info.correct_count > 0:
                     correct_question_total += 1
-                acc = meta_info.accuracy()
-                weight = 1.0 - acc
-                sample_weights.append(weight)
-            else:
-                sample_weights.append(1.0)
         print_and_log(
             f"EI Step {ei_step + 1}/{n_ei_steps}: {correct_question_total}/{len(question_ids)} questions have correct samples."
         )
-        # Normalize weights
-        total_weight = sum(sample_weights)
-        sample_weights = [w / total_weight for w in sample_weights]
         # Sample indices for this EI step
-        sample_question_ids = np.random.choice(
-            question_ids,
-            size=question_batch_size,
-            replace=False,
-            p=sample_weights,
-        )
+        sample_question_ids = np.random.choice(question_ids, size=question_batch_size, replace=False)
         sample_question_ids = list(sample_question_ids)
         assert len(sample_question_ids) == question_batch_size
 
@@ -291,9 +277,12 @@ if __name__ == "__main__":
             if llm is not None:
                 print_and_log("Loading policy weights into vLLM model...")
                 load_policy_into_vllm_instance(llm, vllm)
-                evaluate_vllm(
-                    vllm, prompts, ground_truths, sampling_params
-                )
+
+                print_and_log("evaluating vLLM on sample sets...")
+                evaluate_vllm(vllm, sample_prompts, sample_ground_truths, eval_sampling_params)
+
+                print_and_log("evaluating vLLM on eval sets...")
+                evaluate_vllm(vllm, eval_prompts, eval_ground_truths, eval_sampling_params)
 
         sft_prompts, sft_responses = expert_iter(
             expert_iter_config=expert_iter_config,
