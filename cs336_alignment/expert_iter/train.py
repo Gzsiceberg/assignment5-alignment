@@ -226,6 +226,7 @@ if __name__ == "__main__":
     vllm = None
     train_device = "cuda:0"
     llm: PreTrainedModel | None = None
+    optimizer: torch.optim.Optimizer | None = None
     question_ids = np.array(range(len(prompts)))
     is_sample_device = vllm_device == train_device
     output_dir = f"models/{output_model}"
@@ -331,10 +332,11 @@ if __name__ == "__main__":
 
         if expert_iter_config.global_optimization:
             assert llm is not None
-            optimizer = torch.optim.AdamW(
-                llm.parameters(), lr=sft_config.learning_rate, fused=True,
-                betas=(0.9, 0.95)
-            )
+            if optimizer is None:
+                optimizer = torch.optim.AdamW(
+                    llm.parameters(), lr=sft_config.learning_rate, fused=True,
+                    betas=(0.9, 0.95)
+                )
         else:
             optimizer = None
 
