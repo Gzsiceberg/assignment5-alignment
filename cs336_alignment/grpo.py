@@ -245,14 +245,21 @@ def train_pg(
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     micro_batch_size = sft_config.micro_batch_size
 
-    assert (
-        sample_count == micro_batch_size * gradient_accumulation_steps
-    ), "Sample count must equal micro_batch_size * gradient_accumulation_steps"
+    assert sample_count >= micro_batch_size * gradient_accumulation_steps, (
+        "Sample count must be at least micro_batch_size * gradient_accumulation_steps"
+    )
 
     def get_data_batch_fn(
         micro_iter: int, micro_batch_size: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return get_data_batch(micro_iter, micro_batch_size, input_ids, labels, resp_mask)
+        if sample_count == micro_batch_size * gradient_accumulation_steps:
+            return get_data_batch(micro_iter, micro_batch_size, input_ids, labels, resp_mask)
+
+        sample_idx = np.random.choice(
+            sample_count, size=micro_batch_size, replace=False
+        )
+        assert len(sample_idx) == micro_batch_size, "Sample index size mismatch"
+        return input_ids[sample_idx], labels[sample_idx], resp_mask[sample_idx]
 
     def micro_batch_train_step_fn(
         micro_iter: int,
