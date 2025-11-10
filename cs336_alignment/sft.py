@@ -147,6 +147,17 @@ def train_sft(
     sample_count = input_ids.shape[0]
     sample_content_length = input_ids.shape[1]
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
+    example_count = sample_count
+
+    iter_batch_size = sft_config.micro_batch_size * gradient_accumulation_steps
+    if example_count < iter_batch_size:
+        gradient_accumulation_steps = max(1, example_count // sft_config.micro_batch_size)
+
+    total_training_examples = example_count * sft_config.num_epochs
+    if total_training_examples < iter_batch_size:
+        iter_batch_size = total_training_examples
+    training_steps = total_training_examples // iter_batch_size
+
     if optimizer is None:
         optimizer = torch.optim.AdamW(
             llm.parameters(), lr=sft_config.learning_rate, fused=True
@@ -161,14 +172,6 @@ def train_sft(
         policy_log_probs, response_mask, gradient_accumulation_steps, normalize_constant=1.0
     )
 
-    example_count = input_ids.shape[0]
-    iter_batch_size = (
-        sft_config.micro_batch_size * sft_config.gradient_accumulation_steps
-    )
-    total_training_examples = example_count * sft_config.num_epochs
-    if total_training_examples < iter_batch_size:
-        iter_batch_size = total_training_examples
-    training_steps = total_training_examples // iter_batch_size
     print_and_log(
         f"Total training steps: {training_steps} batch size: {iter_batch_size} example count: {example_count}"
     )
