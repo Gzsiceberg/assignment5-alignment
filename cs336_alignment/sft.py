@@ -84,8 +84,8 @@ def get_data_batch(
 def do_grad_accumulate(
     train_device,
     llm,
-    get_data_batch_fn: Callable[[int, int], tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
-    micro_batch_train_step_fn: Callable[[int, int, torch.Tensor, torch.Tensor, int], tuple[torch.Tensor, dict[str, torch.Tensor]]],
+    get_data_batch_fn: Callable[[int, int], tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]],
+    micro_batch_train_step_fn: Callable[[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, int], tuple[torch.Tensor, dict[str, torch.Tensor]]],
     print_entropy,
     gradient_accumulation_steps,
     micro_batch_size,
@@ -93,10 +93,7 @@ def do_grad_accumulate(
     total_loss = torch.tensor(0.0, device=train_device)
     total_entropy = torch.tensor(0.0, device=train_device)
     for micro_iter in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
-        batch_input_ids, batch_labels, batch_resp_mask = get_data_batch_fn(micro_iter, micro_batch_size)
-        batch_input_ids = batch_input_ids.to(train_device)
-        batch_labels = batch_labels.to(train_device)
-        batch_resp_mask = batch_resp_mask.to(train_device)
+        batch_input_ids, batch_labels, batch_resp_mask, meta_info = get_data_batch_fn(micro_iter, micro_batch_size)
         sample_content_length = batch_input_ids.shape[1]
         assert batch_input_ids.shape == (micro_batch_size, sample_content_length)
         assert batch_labels.shape == (micro_batch_size, sample_content_length)
@@ -126,7 +123,7 @@ def do_grad_accumulate(
                     total_entropy += avg_token_entropy / gradient_accumulation_steps
 
             assert log_probs.shape == (micro_batch_size, sample_content_length)
-            loss, _ = micro_batch_train_step_fn(micro_iter, micro_batch_size, log_probs, batch_resp_mask, gradient_accumulation_steps)
+            loss, _ = micro_batch_train_step_fn(meta_info, log_probs, batch_resp_mask, gradient_accumulation_steps)
             total_loss += loss.detach() / gradient_accumulation_steps
     return total_loss, total_entropy
 
@@ -164,14 +161,21 @@ def train_sft(
         optimizer = torch.optim.AdamW(
             llm.parameters(), lr=sft_config.learning_rate, fused=True
         )
-
-    get_data_batch_fn = lambda micro_iter, micro_batch_size: get_data_batch(
-        sample_count, micro_batch_size, sample_content_length, input_ids, labels, resp_mask
-    )
-
-    micro_batch_train_step_fn = lambda _0, _1, policy_log_probs, response_mask, gradient_accumulation_steps: sft_microbatch_train_step(
-        policy_log_probs, response_mask, gradient_accumulation_steps, normalize_constant=1.0
-    )
+    
+    def get_data_batch_fn(micro_iter, micro_batch_size):
+        b_inputs, b_labels, b_resp_mask = get_data_batch(
+            sample_count, micro_batch_size, sample_content_length, input_ids, labels, resp_mask)
+        b_inputs = b_inputs.to(train_device)
+        b_labels = b_labels.to(train_device)
+        b_resp_mask = b_resp_mask.to(train_device) 
+        return b_inputs, b_labels, b_resp_mask, {}
+    
+    def micro_batch_train_step_fn(
+        meta_info, policy_log_probs, response_mask, gradient_accumulation_steps
+    ):
+        return sft_microbatch_train_step(
+            policy_log_probs, response_mask, gradient_accumulation_steps, normalize_constant=1.0
+        )
 
     print_and_log(
         f"Total training steps: {training_steps} batch size: {iter_batch_size} example count: {example_count}"

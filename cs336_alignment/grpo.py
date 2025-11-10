@@ -190,38 +190,29 @@ def grpo_microbatch_train_step(
 
 
 def get_data_batch(
-    micro_iter: int,
-    micro_batch_size: int,
+    indices: np.ndarray,
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     resp_mask: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    start_idx = micro_iter * micro_batch_size
-    end_idx = start_idx + micro_batch_size
-    assert end_idx <= input_ids.shape[0], "Batch index out of range"
-    batch_input_ids = input_ids[start_idx:end_idx, :]
-    batch_labels = labels[start_idx:end_idx, :]
-    batch_resp_mask = resp_mask[start_idx:end_idx, :]
+    batch_input_ids = input_ids[indices, :]
+    batch_labels = labels[indices, :]
+    batch_resp_mask = resp_mask[indices, :]
     return batch_input_ids, batch_labels, batch_resp_mask
 
 
 def get_grpo_data_batch(
-    micro_iter: int,
-    micro_batch_size: int,
+    indices: np.ndarray,
     raw_rewards: torch.Tensor | None,
     advantages: torch.Tensor | None,
     old_log_probs: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
-    start_idx = micro_iter * micro_batch_size
-    end_idx = start_idx + micro_batch_size
-    if raw_rewards is not None:
-        assert end_idx <= raw_rewards.shape[0], "Batch index out of range"
     batch_raw_rewards = (
-        raw_rewards[start_idx:end_idx] if raw_rewards is not None else None
+        raw_rewards[indices] if raw_rewards is not None else None
     )
-    batch_advantages = advantages[start_idx:end_idx] if advantages is not None else None
+    batch_advantages = advantages[indices] if advantages is not None else None
     batch_old_log_probs = (
-        old_log_probs[start_idx:end_idx] if old_log_probs is not None else None
+        old_log_probs[indices] if old_log_probs is not None else None
     )
     return batch_raw_rewards, batch_advantages, batch_old_log_probs
 
@@ -251,38 +242,33 @@ def train_pg(
 
     def get_data_batch_fn(
         micro_iter: int, micro_batch_size: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        meta_info = {}
         if sample_count == micro_batch_size * gradient_accumulation_steps:
-            return get_data_batch(micro_iter, micro_batch_size, input_ids, labels, resp_mask)
-
-        sample_idx = np.random.choice(
-            sample_count, size=micro_batch_size, replace=False
-        )
+            sample_idx = np.arange(start=micro_iter * micro_batch_size, stop=(micro_iter + 1) * micro_batch_size)
+        else:
+            sample_idx = np.random.choice(
+                sample_count, size=micro_batch_size, replace=False
+            )
         assert len(sample_idx) == micro_batch_size, "Sample index size mismatch"
-        return input_ids[sample_idx], labels[sample_idx], resp_mask[sample_idx]
+        raw_rewards_batch, advantages_batch, old_log_probs_batch = get_grpo_data_batch(
+            sample_idx, raw_rewards, advantages, old_log_probs
+        )
+        meta_info["raw_rewards"] = raw_rewards_batch
+        meta_info["advantages"] = advantages_batch
+        meta_info["old_log_probs"] = old_log_probs_batch
+        b_inputs, b_labels, b_resp_mask = get_data_batch(sample_idx, input_ids, labels, resp_mask)
+        return b_inputs, b_labels, b_resp_mask, meta_info
 
     def micro_batch_train_step_fn(
-        micro_iter: int,
-        micro_batch_size: int,
+        meta_info: dict[str, torch.Tensor],
         policy_log_probs: torch.Tensor,
         response_mask: torch.Tensor,
         gradient_accumulation_steps: int,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        raw_rewards_batch, advantages_batch, old_log_probs_batch = get_grpo_data_batch(
-            micro_iter, micro_batch_size, raw_rewards, advantages, old_log_probs
-        )
-        if raw_rewards_batch is not None:
-            assert (
-                raw_rewards_batch.shape[0] == micro_batch_size
-            ), "Raw rewards batch size mismatch"
-        if advantages_batch is not None:
-            assert (
-                advantages_batch.shape[0] == micro_batch_size
-            ), "Advantages batch size mismatch"
-        if old_log_probs_batch is not None:
-            assert (
-                old_log_probs_batch.shape[0] == micro_batch_size
-            ), "Old log probs batch size mismatch"
+        raw_rewards_batch = meta_info.get("raw_rewards", None)
+        advantages_batch = meta_info.get("advantages", None)
+        old_log_probs_batch = meta_info.get("old_log_probs", None)
         return grpo_microbatch_train_step(
             policy_log_probs,
             response_mask,
