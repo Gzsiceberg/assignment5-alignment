@@ -9,4 +9,4 @@ ExpertIterConfig:
   sample_batch_size: 8
   n_ei_steps: 10
   use_all_positive: True
-  global_optimization: True
+  # global_optimization: True
