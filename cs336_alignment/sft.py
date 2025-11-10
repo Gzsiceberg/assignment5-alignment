@@ -92,13 +92,13 @@ def do_grad_accumulate(
 ):
     total_loss = torch.tensor(0.0, device=train_device)
     total_entropy = torch.tensor(0.0, device=train_device)
+    total_meta_info = {}
     for micro_iter in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
-        batch_input_ids, batch_labels, batch_resp_mask, meta_info = get_data_batch_fn(micro_iter, micro_batch_size)
+        batch_input_ids, batch_labels, batch_resp_mask, extra_data = get_data_batch_fn(micro_iter, micro_batch_size)
         sample_content_length = batch_input_ids.shape[1]
         assert batch_input_ids.shape == (micro_batch_size, sample_content_length)
         assert batch_labels.shape == (micro_batch_size, sample_content_length)
         assert batch_resp_mask.shape == (micro_batch_size, sample_content_length)
-
 
         with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
             results = get_response_log_probs(
@@ -123,9 +123,14 @@ def do_grad_accumulate(
                     total_entropy += avg_token_entropy / gradient_accumulation_steps
 
             assert log_probs.shape == (micro_batch_size, sample_content_length)
-            loss, _ = micro_batch_train_step_fn(meta_info, log_probs, batch_resp_mask, gradient_accumulation_steps)
+            loss, meta_info = micro_batch_train_step_fn(extra_data, log_probs, batch_resp_mask, gradient_accumulation_steps)
+            for k, v in meta_info.items():
+                if k not in total_meta_info:
+                    total_meta_info[k] = v.detach() / gradient_accumulation_steps
+                else:
+                    total_meta_info[k] += v.detach() / gradient_accumulation_steps
             total_loss += loss.detach() / gradient_accumulation_steps
-    return total_loss, total_entropy
+    return total_loss, total_entropy, total_meta_info
 
 
 def train_sft(
@@ -197,7 +202,7 @@ def train_sft(
     else:
         lr_scheduler = None
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
-        total_loss, total_entropy = do_grad_accumulate(
+        total_loss, total_entropy, _ = do_grad_accumulate(
             train_device=train_device,
             llm=llm,
             get_data_batch_fn=get_data_batch_fn,

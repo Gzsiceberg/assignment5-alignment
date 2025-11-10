@@ -256,10 +256,13 @@ def train_pg(
         raw_rewards_batch, advantages_batch, old_log_probs_batch = get_grpo_data_batch(
             sample_idx, raw_rewards, advantages, old_log_probs
         )
-        meta_info["raw_rewards"] = raw_rewards_batch
-        meta_info["advantages"] = advantages_batch
-        meta_info["old_log_probs"] = old_log_probs_batch
+        meta_info["raw_rewards"] = raw_rewards_batch.to(train_device) if raw_rewards_batch is not None else None
+        meta_info["advantages"] = advantages_batch.to(train_device) if advantages_batch is not None else None
+        meta_info["old_log_probs"] = old_log_probs_batch.to(train_device) if old_log_probs_batch is not None else None
         b_inputs, b_labels, b_resp_mask = get_data_batch(sample_idx, input_ids, labels, resp_mask)
+        b_inputs = b_inputs.to(train_device)
+        b_labels = b_labels.to(train_device)
+        b_resp_mask = b_resp_mask.to(train_device)
         return b_inputs, b_labels, b_resp_mask, meta_info
 
     def micro_batch_train_step_fn(
@@ -291,7 +294,7 @@ def train_pg(
 
     start_time = time.time()
     for st in (pbar := trange(training_steps, desc="PG Training Steps")):
-        total_loss, total_entropy = do_grad_accumulate(
+        total_loss, total_entropy, total_meta_info = do_grad_accumulate(
             train_device=train_device,
             llm=llm,
             get_data_batch_fn=get_data_batch_fn,
@@ -313,6 +316,9 @@ def train_pg(
         optimizer.zero_grad()
 
         st_log += f" Loss={total_loss.item():.4f} Entropy={total_entropy.item():.4f}"
+        for k, v in total_meta_info.items():
+            if isinstance(v, torch.Tensor):
+                st_log += f" {k}={v.item():.4f}"
         print_and_log(st_log)
         pbar.set_description(f"Loss: {total_loss.item():.4f}")  # type: ignore
 
@@ -505,6 +511,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             ):
                 old_log_probs = get_log_probs(
                     sft_config,
+                    train_device,
                     llm,
                     rollout_batch_size,
                     input_ids,
@@ -534,6 +541,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
 
 def get_log_probs(
     sft_config: SftConfig,
+    train_device: str,
     llm: PreTrainedModel,
     rollout_batch_size: int,
     input_ids: torch.Tensor,
@@ -543,7 +551,7 @@ def get_log_probs(
     old_log_probs = torch.empty(
         (rollout_batch_size, input_ids.shape[1]),
         dtype=torch.float32,
-        device=input_ids.device,
+        device=train_device,
     )
     micro_batch_size = sft_config.micro_batch_size
     for micro_iter in tqdm(
@@ -562,10 +570,7 @@ def get_log_probs(
             response_mask,
         )
         results = get_response_log_probs(llm, batch_input_ids, batch_labels, False)
-        start_idx = micro_iter * micro_batch_size
-        end_idx = start_idx + micro_batch_size
-        assert end_idx <= rollout_batch_size, "Old log probs index out of range"
-        old_log_probs[start_idx:end_idx, :] = results["log_probs"]
+        old_log_probs[sample_idx, :] = results["log_probs"]
     return old_log_probs
 
 

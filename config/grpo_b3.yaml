@@ -1,5 +1,5 @@
 SftConfig:
-  num_epochs: 3
+  num_epochs: 2
   learning_rate: 3e-5
   gradient_accumulation_steps: 64
   micro_batch_size: 4
@@ -13,4 +13,4 @@ RLConfig:
   group_size: 8
   advantage_eps: 1e-6
   length_normalization: False
-  use_std_normalization: True
+  use_std_normalization: False
