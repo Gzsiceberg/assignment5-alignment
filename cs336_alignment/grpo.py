@@ -105,7 +105,7 @@ def compute_grpo_clip_loss(
     clip_loss = ratio_clipped * advantages
     loss = -torch.min(normal_loss, clip_loss)
     assert loss.shape == (batch_size, seq_len), "Loss shape mismatch"
-    clip_count = torch.abs(loss - clip_loss) < 1e-5
+    clip_count = torch.abs(normal_loss - clip_loss) > 1e-5
     meta_info = {"clip_fraction": clip_count.float().mean()}
     return loss, meta_info
 
