@@ -182,7 +182,7 @@ def grpo_microbatch_train_step(
     if length_normalization:
         masked_loss = masked_mean(loss, response_mask, dim=1, protect_zero_division=False)
     else:
-        masked_loss = masked_normalize(loss, response_mask, normalize_constant=1280, dim=1)
+        masked_loss = masked_normalize(loss, response_mask, normalize_constant=1024, dim=1)
     assert masked_loss.shape == (batch_size,), "Masked loss shape mismatch"
     mean_loss = masked_loss.mean() / gradient_accumulation_steps
     mean_loss.backward()
