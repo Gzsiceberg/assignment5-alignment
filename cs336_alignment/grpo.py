@@ -148,6 +148,8 @@ def compute_policy_gradient_loss(
                 advantages, policy_log_probs, old_log_probs, cliprange
             )
             meta_info.update(meta_info_clip)
+        case _:
+            raise ValueError(f"Unknown loss type: {loss_type}")
 
     assert loss.shape == (
         batch_size,
@@ -416,7 +418,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
                 gpu_memory_utilization=0.9 if not is_sample_device else 0.7, 
             )
 
-        if llm is not None and ((step + 1) % 10 == 0 or is_last_step):
+        if llm is not None and rl_config.eval_interval > 0 and ((step + 1) % rl_config.eval_interval == 0 or is_last_step):
             vllm_evaluate(
                 llm, vllm, eval_prompts, eval_ground_truths, eval_sampling_params
             )
@@ -440,12 +442,19 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             len(rollout_responses) == rollout_batch_size
         ), f"Expected {rollout_batch_size} rollout responses, got {len(rollout_responses)}"
 
+        def simple_reward_fn(ans: str, gt: str) -> dict[str, float]:
+            if len(ans) < len(gt):
+                return {"reward": 1.0, "format_reward": 1.0}
+            else:
+                return {"reward": 0.0, "format_reward": 0.0}
+
         advantages, raw_rewards, reward_meta_info = compute_group_normalized_rewards(
             rollout_responses,
             rollout_ground_truths,
             rl_config.group_size,
             rl_config.advantage_eps,
             rl_config.use_std_normalization,
+            reward_fn=simple_reward_fn,
         )
         advantages = advantages.to(train_device)
         raw_rewards = raw_rewards.to(train_device)
@@ -494,7 +503,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
         if rl_config.loss_type == "grpo_clip":
             assert llm is not None, "LLM must be initialized for GRPO-CLIP"
             with (
-                torch.no_grad(),
+                torch.inference_mode(True),
                 torch.autocast(device_type=train_device, dtype=torch.bfloat16),
             ):
                 old_log_probs = get_log_probs(
@@ -521,7 +530,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             old_log_probs=old_log_probs,
         )
 
-        if llm is not None and ((step + 1) % 10 == 0 or is_last_step):
+        if llm is not None and rl_config.eval_interval > 0 and ((step + 1) % rl_config.eval_interval == 0 or is_last_step):
             print_and_log(f"Saving model checkpoint at step {step+1}...")
             llm.save_pretrained(output_dir)
 

@@ -25,6 +25,7 @@ class RLConfig(BaseModel):
     group_size: int = 8
     use_std_normalization: bool = True
     advantage_eps: float = 1e-6
+    eval_interval: int = 10
 
 
 class ExpertIterConfig(BaseModel):
