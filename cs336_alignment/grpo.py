@@ -470,7 +470,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
         print_and_log(f"Input IDs shape: {input_ids.shape}")
 
         if llm is None:
-            print_and_log("Loading model for SFT training...")
+            print_and_log("Loading model for PG training...")
             llm = AutoModelForCausalLM.from_pretrained(
                 f"models/{sft_config.model_id}",
                 torch_dtype=torch.bfloat16,
@@ -481,6 +481,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
 
         if optimizer is None:
             assert llm is not None, "LLM should be initialized by this point"
+            print_and_log("Initializing optimizer for PG training...")
             optimizer = torch.optim.AdamW(
                 llm.parameters(),
                 lr=sft_config.learning_rate,
