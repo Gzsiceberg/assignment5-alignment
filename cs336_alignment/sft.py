@@ -127,7 +127,7 @@ def do_grad_accumulate(
 
             assert log_probs.shape == (micro_batch_size, sample_content_length)
             loss, _ = micro_batch_train_step_fn(micro_iter, micro_batch_size, log_probs, batch_resp_mask, gradient_accumulation_steps)
-            total_loss += loss.detach()
+            total_loss += loss.detach() / gradient_accumulation_steps
     return total_loss, total_entropy
 
 
