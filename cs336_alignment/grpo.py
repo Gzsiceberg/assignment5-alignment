@@ -445,19 +445,12 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
             len(rollout_responses) == rollout_batch_size
         ), f"Expected {rollout_batch_size} rollout responses, got {len(rollout_responses)}"
 
-        def simple_reward_fn(ans: str, gt: str) -> dict[str, float]:
-            if len(ans) < len(gt) * 0.5:
-                return {"reward": 1.0, "format_reward": 1.0}
-            else:
-                return {"reward": 0.0, "format_reward": 0.0}
-
         advantages, raw_rewards, reward_meta_info = compute_group_normalized_rewards(
             rollout_responses,
             rollout_ground_truths,
             rl_config.group_size,
             rl_config.advantage_eps,
             rl_config.use_std_normalization,
-            reward_fn=simple_reward_fn,
         )
         advantages = advantages.to(train_device)
         raw_rewards = raw_rewards.to(train_device)
