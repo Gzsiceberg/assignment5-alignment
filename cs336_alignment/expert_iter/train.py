@@ -345,7 +345,7 @@ if __name__ == "__main__":
             use_lr_scheduler=not expert_iter_config.global_optimization,
         )
 
-        if llm is not None:
+        if llm is not None and (ei_step + 1) % 2 == 0:
             print_and_log(
                 f"{ei_step + 1}/{n_ei_steps} Saving fine-tuned model to {output_dir}..."
             )
@@ -353,6 +353,7 @@ if __name__ == "__main__":
             if ei_step == 0:
                 tokenizer.save_pretrained(save_directory=output_dir)
 
+    llm.save_pretrained(save_directory=output_dir)  # type: ignore
     if vllm is None:
         vllm = init_vllm(
             model_id=output_dir,
