@@ -301,20 +301,19 @@ def train_pg(
             micro_batch_size=micro_batch_size,
         )
 
+        st_log: str = f"Step={st+1}/{training_steps}"
+
         if sft_config.clip_gradients > 0.0:
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 llm.parameters(), max_norm=sft_config.clip_gradients
             )
-            print_and_log(
-                f"GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
-            )
+            st_log += f" GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
 
         optimizer.step()
         optimizer.zero_grad()
 
-        print_and_log(
-            f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - Entropy: {total_entropy.item():.4f}"
-        )
+        st_log += f" Loss={total_loss.item():.4f} Entropy={total_entropy.item():.4f}"
+        print_and_log(st_log)
         pbar.set_description(f"Loss: {total_loss.item():.4f}")  # type: ignore
 
     end_time = time.time()
