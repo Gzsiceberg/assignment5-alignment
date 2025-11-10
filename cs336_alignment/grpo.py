@@ -210,7 +210,8 @@ def get_grpo_data_batch(
 ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
     start_idx = micro_iter * micro_batch_size
     end_idx = start_idx + micro_batch_size
-    assert end_idx <= raw_rewards.shape[0], "Batch index out of range"
+    if raw_rewards is not None:
+        assert end_idx <= raw_rewards.shape[0], "Batch index out of range"
     batch_raw_rewards = (
         raw_rewards[start_idx:end_idx] if raw_rewards is not None else None
     )
