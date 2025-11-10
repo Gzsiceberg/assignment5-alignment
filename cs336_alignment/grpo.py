@@ -410,6 +410,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml")):
 
     for step in (pbar := trange(rl_config.steps, desc="GRPO Overall Steps")):
         is_last_step = (step + 1) == rl_config.steps
+        print_and_log("=" * 80)
         print_and_log(f"GRPO Overall Step {step+1}/{rl_config.steps} starting...")
         sample_question_ids = np.random.choice(
             question_ids,
