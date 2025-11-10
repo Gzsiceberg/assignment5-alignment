@@ -245,7 +245,9 @@ def train_pg(
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         meta_info = {}
         if sample_count == micro_batch_size * gradient_accumulation_steps:
-            sample_idx = np.arange(start=micro_iter * micro_batch_size, stop=(micro_iter + 1) * micro_batch_size)
+            start_idx = micro_iter * micro_batch_size
+            end_idx = start_idx + micro_batch_size
+            sample_idx = np.arange(start=start_idx, stop=end_idx)
         else:
             sample_idx = np.random.choice(
                 sample_count, size=micro_batch_size, replace=False
