@@ -168,6 +168,7 @@ def grpo_microbatch_train_step(
     advantages: torch.Tensor | None = None,
     old_log_probs: torch.Tensor | None = None,
     cliprange: float | None = None,
+    length_normalization: bool = True,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     batch_size, seq_len = policy_log_probs.shape
     loss, meta_info = compute_policy_gradient_loss(
@@ -178,7 +179,10 @@ def grpo_microbatch_train_step(
         old_log_probs,
         cliprange,
     )
-    masked_loss = masked_mean(loss, response_mask, dim=1, protect_zero_division=False)
+    if length_normalization:
+        masked_loss = masked_mean(loss, response_mask, dim=1, protect_zero_division=False)
+    else:
+        masked_loss = masked_normalize(loss, response_mask, normalize_constant=1280, dim=1)
     assert masked_loss.shape == (batch_size,), "Masked loss shape mismatch"
     mean_loss = masked_loss.mean() / gradient_accumulation_steps
     mean_loss.backward()
@@ -281,6 +285,7 @@ def train_pg(
             advantages_batch,
             old_log_probs_batch,
             rl_config.cliprange,
+            length_normalization=rl_config.length_normalization,
         )
 
     iter_batch_size = micro_batch_size * gradient_accumulation_steps
