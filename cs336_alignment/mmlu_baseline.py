@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import regex as re
 from typing import Callable
 from git import List
 from joblib import Memory
@@ -21,7 +22,7 @@ class EvalEntry:
     reward: float
 
 
-def extract_answer(response: str) -> str | None:
+def extract_mmlu_answer(response: str) -> str | None:
     if "The correct answer is" not in response:
         return None
     groups = response.split("The correct answer is")
@@ -75,23 +76,33 @@ Answer:"""
 
 
 def mmlu_reward(response: str, ground_truth: str) -> float:
-    answer = extract_answer(response)
+    answer = extract_mmlu_answer(response)
     if answer is None:
         return 0.0
     return 1.0 if answer == ground_truth else 0.0
 
 
+def extract_gsm8k_answer(response: str) -> str | None:
+    # Extract the final numerical answer from the response
+    matches = re.findall(r"-?\d*\.?\d+", response.replace(",", ""))
+    if len(matches) == 0:
+        return None
+    match_str: str = matches[-1]
+    return match_str.strip().strip(".").strip(",")
+
+
 def gsm8k_reward(response: str, ground_truth: str) -> float:
-    from cs336_alignment.extract import extract_gsm_answer
+    from cs336_alignment.extract import extract_gsm_gt
     from math_verify import parse, verify
 
-    answer = parse(response)
+    answer = extract_gsm8k_answer(response)
     if answer is None:
         return -1.0
-    gt = extract_gsm_answer(ground_truth)
+    gt = extract_gsm_gt(ground_truth)
     if gt is None:
         return -1
-    is_correct = verify(answer, gt)
+    # is_correct = verify(answer, gt)
+    is_correct = answer == gt
     return 1.0 if is_correct else 0.0
 
 

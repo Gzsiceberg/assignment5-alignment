@@ -30,7 +30,7 @@ PRM800K_ANS_PRRFIX = "# Answer"
 GSM8K_ANS_PREFIX = "####"
 
 
-def extract_gsm_answer(completion):
+def extract_gsm_gt(completion):
     """
     Extract the numerical answer after #### marker.
     Follows official code for normalization:
@@ -40,7 +40,7 @@ def extract_gsm_answer(completion):
     if match:
         match_str = match.group(1).strip()
         match_str = match_str.replace(",", "")
-        return match_str
+        return match_str.strip().strip(".").strip(",")
     return None
 
 
