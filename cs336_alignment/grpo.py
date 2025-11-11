@@ -90,6 +90,9 @@ def compute_naive_policy_gradient_loss(
     return -policy_log_probs * raw_rewards_or_advantages
 
 
+# TODO: try to implement sequence level GRPO-CLIP loss, based on GSPO paper
+# https://huggingface.co/blog/NormalUhr/grpo-to-dapo-and-gspo
+
 def compute_grpo_clip_loss(
     advantages: torch.Tensor,
     policy_log_probs: torch.Tensor,
