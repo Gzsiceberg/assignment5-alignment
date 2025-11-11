@@ -25,6 +25,7 @@ dependencies = [
     "fsspec>=2025.3.2",
     "huggingface-hub>=0.31.1",
     "jaxtyping>=0.3.3",
+    "modelscope>=1.31.0",
 ]
 
 [tool.setuptools.packages.find]
