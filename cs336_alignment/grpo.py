@@ -266,6 +266,7 @@ def train_pg(
         meta_info["raw_rewards"] = raw_rewards_batch.to(train_device) if raw_rewards_batch is not None else None
         meta_info["advantages"] = advantages_batch.to(train_device) if advantages_batch is not None else None
         meta_info["old_log_probs"] = old_log_probs_batch.to(train_device) if old_log_probs_batch is not None else None
+        meta_info["micro_iter"] = micro_iter
         b_inputs, b_labels, b_resp_mask = get_data_batch(sample_idx, input_ids, labels, resp_mask)
         b_inputs = b_inputs.to(train_device)
         b_labels = b_labels.to(train_device)
@@ -278,6 +279,7 @@ def train_pg(
         response_mask: torch.Tensor,
         gradient_accumulation_steps: int,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        micro_iter = meta_info["micro_iter"]
         raw_rewards_batch = meta_info.get("raw_rewards", None)
         advantages_batch = meta_info.get("advantages", None)
         old_log_probs_batch = meta_info.get("old_log_probs", None)
@@ -468,10 +470,9 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml"),
 
         if test_mode:
             def fake_reward_fn(ans: str, gt: str) -> dict[str, float]:
-                if len(ans) < len(gt) * 0.5:
-                    return {"reward": 1.0, "format_reward": 1.0}
-                else:
-                    return {"reward": 0.0, "format_reward": 0.0}
+                reward_dict = r1_zero_reward_fn(ans, gt, fast=True)
+                reward_dict["reward"] = reward_dict["format_reward"]
+                return reward_dict
 
         advantages, raw_rewards, reward_meta_info = compute_group_normalized_rewards(
             rollout_responses,
@@ -486,6 +487,9 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml"),
         mean_reward = reward_meta_info["mean_reward"]
         format_reward = reward_meta_info["mean_format_reward"]
         print_and_log(f"MeanReward={mean_reward:.4f} FormatReward={format_reward:.4f} AdvantageMean={advantages.mean().item():.4f} AdvStd={advantages.std().item():.4f}")
+        if np.isclose(mean_reward, 0.0) or np.isclose(mean_reward, 1.0):
+            print_and_log("Warning: Mean reward is close to zero or one, do not expect meaningful learning signal.")
+            continue
 
         # Free up vLLM memory if on the same device
         if is_sample_device:
