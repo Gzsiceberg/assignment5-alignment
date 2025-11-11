@@ -404,7 +404,8 @@ def run_parse_mmlu_response(
         str (one of "A", "B", "C", or "D") if the model output can be parsed into a prediction,
         else None.
     """
-    raise NotImplementedError
+    from cs336_alignment.mmlu_baseline import extract_answer
+    return extract_answer(model_output)
 
 
 def run_parse_gsm8k_response(
