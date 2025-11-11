@@ -2,6 +2,7 @@ import gc
 import os
 
 os.environ["VLLM_LOGGING_LEVEL"] = "ERROR"
+import random
 import time
 import torch
 import numpy as np
@@ -342,7 +343,13 @@ def rollout(
 
 
 def train(config_name: str = typer.Argument("config/grpo_test.yaml"),
-          test_mode: bool = typer.Option(False, "-t", help="If true, runs in test mode with reduced steps")):
+          test_mode: bool = typer.Option(False, "-t", help="If true, runs in test mode with reduced steps"),
+          seed: int = typer.Option(42, "-s", help="Random seed for reproducibility")):
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     config = load_config_from_file(config_name)
     sft_config: SftConfig = SftConfig(**config["SftConfig"])
     rl_config: RLConfig = RLConfig(**config["RLConfig"])

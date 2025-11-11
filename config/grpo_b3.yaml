@@ -1,6 +1,6 @@
 SftConfig:
   num_epochs: 2
-  learning_rate: 1.5e-5
+  learning_rate: 3e-5
   gradient_accumulation_steps: 64
   micro_batch_size: 4
   max_examples: 3072
