@@ -93,6 +93,7 @@ def evaluate_vllm(
 
     eval_entries: List[EvalEntry] = []
     correct_count = 0
+    failed_count = 0
     for ground_truth, resp in tqdm(zip(ground_truths, responses), total=len(responses), desc="evaluating responses"):
         answer = extract_answer(resp)
         eval_entry = EvalEntry(
@@ -102,10 +103,13 @@ def evaluate_vllm(
             ground_truth=ground_truth,
         )
         eval_entries.append(eval_entry)
-        if answer is not None and answer == ground_truth:
+        if answer is None:
+            failed_count += 1
+        elif answer == ground_truth:
             correct_count += 1
     accuracy = correct_count / len(responses)
-    print_and_log(f"Evaluation accuracy: {accuracy*100:.2f}%")
+    fail_rate = failed_count / len(responses)
+    print_and_log(f"Evaluation on {len(responses)} examples: accuracy={accuracy*100:.2f}% failrate={fail_rate*100:.2f}%")
 
     if not dump_data:
         return
