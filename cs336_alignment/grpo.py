@@ -101,8 +101,14 @@ def compute_grpo_clip_loss(
         advantages = rearrange(advantages, "b -> b 1")
     assert advantages.shape == (batch_size, 1), "Advantages shape mismatch"
     ratio = torch.exp(policy_log_probs - old_log_probs)
-    ratio_clipped = torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
     normal_loss = ratio * advantages
+
+    if cliprange < 0.0 or cliprange > 1.0:
+        loss = -normal_loss
+        meta_info = {"clip_fraction": torch.tensor(0.0)}
+        return loss, meta_info
+
+    ratio_clipped = torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
     clip_loss = ratio_clipped * advantages
     loss = -torch.min(normal_loss, clip_loss)
     assert loss.shape == (batch_size, seq_len), "Loss shape mismatch"

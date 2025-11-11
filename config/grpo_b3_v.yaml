@@ -1,0 +1,16 @@
+SftConfig:
+  num_epochs: 2
+  learning_rate: 2e-5
+  gradient_accumulation_steps: 64
+  micro_batch_size: 4
+  max_examples: 3072
+
+RLConfig:
+  steps: 100
+  loss_type: "grpo_clip"
+  cliprange: -1
+  rollout_batch_size: 256
+  group_size: 8
+  advantage_eps: 1e-6
+  length_normalization: False
+  use_std_normalization: False
