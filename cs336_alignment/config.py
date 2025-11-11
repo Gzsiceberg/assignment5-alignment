@@ -19,7 +19,7 @@ class SftConfig(BaseModel):
 
 class RLConfig(BaseModel):
     steps: int = 200
-    loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"] = "reinforce_with_baseline"
+    loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip", "gspo_clip"] = "reinforce_with_baseline"
     cliprange: float = 0.2
     rollout_batch_size: int = 256
     group_size: int = 8

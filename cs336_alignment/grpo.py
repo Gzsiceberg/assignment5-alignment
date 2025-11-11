@@ -90,8 +90,40 @@ def compute_naive_policy_gradient_loss(
     return -policy_log_probs * raw_rewards_or_advantages
 
 
-# TODO: try to implement sequence level GRPO-CLIP loss, based on GSPO paper
-# https://huggingface.co/blog/NormalUhr/grpo-to-dapo-and-gspo
+"""implement sequence level GRPO-CLIP loss, based on GSPO paper
+https://huggingface.co/blog/NormalUhr/grpo-to-dapo-and-gspo
+"""
+def compute_gspo_clip_loss(
+    advantages: torch.Tensor,
+    policy_log_probs: torch.Tensor,
+    old_log_probs: torch.Tensor,
+    cliprange: float,
+    response_mask: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    batch_size, seq_len = policy_log_probs.shape
+    if advantages.ndim == 1:
+        advantages = rearrange(advantages, "b -> b 1")
+    assert advantages.shape == (batch_size, 1), "Advantages shape mismatch"
+    log_importance_weight = policy_log_probs - old_log_probs
+    log_importance_weight = (log_importance_weight * response_mask).sum(dim=-1) / response_mask.sum(dim=-1).clamp(min=1.0)
+    log_importance_weight = rearrange(log_importance_weight, "b -> b 1")
+    ratio = torch.exp(log_importance_weight)
+    assert ratio.shape == (batch_size, 1), "Ratio shape mismatch"
+
+    normal_loss = ratio * advantages
+
+    if cliprange < 0.0 or cliprange > 1.0:
+        loss = -normal_loss
+        meta_info = {"clip_fraction": torch.tensor(0.0)}
+        return loss, meta_info
+
+    ratio_clipped = torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
+    clip_loss = ratio_clipped * advantages
+    loss = -torch.min(normal_loss, clip_loss)
+    assert loss.shape == (batch_size, 1), "Loss shape mismatch"
+    clip_count = torch.abs(normal_loss - clip_loss) > 1e-5
+    meta_info = {"clip_fraction": clip_count.float().mean()}
+    return loss, meta_info
 
 def compute_grpo_clip_loss(
     advantages: torch.Tensor,
@@ -127,6 +159,7 @@ def compute_policy_gradient_loss(
     advantages: torch.Tensor | None = None,
     old_log_probs: torch.Tensor | None = None,
     cliprange: float | None = None,
+    response_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     batch_size, seq_len = policy_log_probs.shape
     assert (
@@ -159,13 +192,18 @@ def compute_policy_gradient_loss(
                 advantages, policy_log_probs, old_log_probs, cliprange
             )
             meta_info.update(meta_info_clip)
+        case "gspo_clip":
+            assert advantages is not None, "Advantages required for gspo_clip loss"
+            assert (
+                old_log_probs is not None
+            ), "Old log probs required for gspo_clip loss"
+            assert cliprange is not None, "Cliprange required for gspo_clip loss"
+            loss, meta_info_clip = compute_gspo_clip_loss(
+                advantages, policy_log_probs, old_log_probs, cliprange, response_mask
+            )
+            meta_info.update(meta_info_clip)
         case _:
             raise ValueError(f"Unknown loss type: {loss_type}")
-
-    assert loss.shape == (
-        batch_size,
-        seq_len,
-    ), f"loss shape mismatch: expected {(batch_size, seq_len)}, got {loss.shape}"
     return loss, meta_info
 
 
@@ -188,8 +226,12 @@ def grpo_microbatch_train_step(
         advantages,
         old_log_probs,
         cliprange,
+        response_mask,
     )
-    if length_normalization:
+    if loss_type == "gspo_clip":
+        assert loss.shape == (batch_size, 1), "Loss shape mismatch for GSPO-CLIP"
+        masked_loss = loss.squeeze(1)
+    elif length_normalization:
         masked_loss = masked_mean(loss, response_mask, dim=1, protect_zero_division=False)
     else:
         masked_loss = masked_normalize(loss, response_mask, normalize_constant=1024, dim=1)
@@ -529,7 +571,7 @@ def train(config_name: str = typer.Argument("config/grpo_test.yaml"),
             )
 
         old_log_probs = None
-        if rl_config.loss_type == "grpo_clip":
+        if "_clip" in rl_config.loss_type:
             assert llm is not None, "LLM must be initialized for GRPO-CLIP"
             with (
                 torch.inference_mode(True),

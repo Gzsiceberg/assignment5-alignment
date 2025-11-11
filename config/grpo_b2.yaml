@@ -6,11 +6,9 @@ SftConfig:
   max_examples: 3072
 
 RLConfig:
-  steps: 100
+  steps: 50
   loss_type: "grpo_clip"
-  cliprange: 0.1
+  cliprange: 0.2
   rollout_batch_size: 256
   group_size: 8
   advantage_eps: 1e-6
-  length_normalization: False
-  use_std_normalization: False

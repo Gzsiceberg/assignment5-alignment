@@ -7,7 +7,7 @@ SftConfig:
   max_examples: 8
 
 RLConfig:
-  loss_type: "grpo_clip"
+  loss_type: "gspo_clip"
   steps: 200
   cliprange: 0.2
   rollout_batch_size: 8
