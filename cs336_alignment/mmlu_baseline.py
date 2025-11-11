@@ -17,7 +17,6 @@ memory = Memory("data/.cache", verbose=0)
 class EvalEntry:
     prompt: str
     response: str
-    parse_answer: str | None
     ground_truth: str
     reward: float
 
@@ -75,21 +74,25 @@ Answer:"""
     return {"prompt": prompt.format(question=example["question"])}
 
 
-def mmlu_reward(response: str, ground_truth: str) -> tuple[str | None, float]:
+def mmlu_reward(response: str, ground_truth: str) -> float:
     answer = extract_answer(response)
     if answer is None:
-        return None, 0.0
-    return answer, 1.0 if answer == ground_truth else 0.0
+        return 0.0
+    return 1.0 if answer == ground_truth else 0.0
 
 
-def gsm8k_reward(response: str, ground_truth: str) -> tuple[str | None, float]:
+def gsm8k_reward(response: str, ground_truth: str) -> float:
     from cs336_alignment.extract import extract_gsm_answer
+    from math_verify import parse, verify
 
-    answer = extract_gsm_answer(response)
-    gt = extract_gsm_answer(ground_truth)
+    answer = parse(response)
     if answer is None:
-        return None, 0.0
-    return answer, 1.0 if answer == gt else 0.0
+        return -1.0
+    gt = extract_gsm_answer(ground_truth)
+    if gt is None:
+        return -1
+    is_correct = verify(answer, gt)
+    return 1.0 if is_correct else 0.0
 
 
 def evaluate_vllm(
@@ -97,7 +100,7 @@ def evaluate_vllm(
     prompts: List[str],
     ground_truths: List[str],
     eval_sampling_params: SamplingParams,
-    reward_fn: Callable[[str, str], tuple[str | None, float]] = mmlu_reward,
+    reward_fn: Callable[[str, str], float] = mmlu_reward,
 ) -> List[EvalEntry]:
     batch_size = 32
     # get gpu memory maximum
@@ -126,16 +129,15 @@ def evaluate_vllm(
     for ground_truth, resp in tqdm(
         zip(ground_truths, responses), total=len(responses), desc="evaluating responses"
     ):
-        answer, reward = reward_fn(resp, ground_truth)
+        reward = reward_fn(resp, ground_truth)
         eval_entry = EvalEntry(
             prompt=prompts[len(eval_entries)],
             response=resp,
-            parse_answer=answer,
             ground_truth=ground_truth,
             reward=reward,
         )
         eval_entries.append(eval_entry)
-        if answer is None:
+        if reward < 0.0:
             failed_count += 1
         elif reward > 0.0:
             correct_count += 1
@@ -189,7 +191,7 @@ def main(
         test = test.map(gen_mmlu_prompt)
         ground_truths = test["answer"]
         eval_sampling_params = get_evaluation_sample_params(
-            1, max_tokens=4096, temperature=0.0, stop=["# Query:"]
+            1, max_tokens=2048, temperature=0.0, stop=["# Query:"]
         )
     elif dataset == "gsm8k":
         ds = load_dataset("gsm8k", "main")
@@ -201,13 +203,12 @@ def main(
         test = test.map(gen_gsm8k_prompt)
         ground_truths = test["answer"]
         eval_sampling_params = get_evaluation_sample_params(
-            1, max_tokens=4096, temperature=0.0, stop=None
+            1, max_tokens=2048, temperature=0.0, stop=None
         )
 
     prompts = test["prompt"]  # type: ignore
     assert len(prompts) == len(ground_truths)
     assert eval_sampling_params is not None
-    print_and_log(f"Loaded {len(prompts)} evaluation samples from MMLU {split} split.")
 
     from vllm_util import init_vllm
 
