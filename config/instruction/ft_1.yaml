@@ -1,0 +1,4 @@
+lr: 2e-5
+batch_size: 32
+gradient_accumulation_steps: 16
+epochs: 1
