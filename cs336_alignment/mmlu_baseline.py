@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import os
 import regex as re
+import json
 from typing import Callable
 from git import List
 from joblib import Memory
@@ -111,7 +113,7 @@ def evaluate_vllm(
     prompts: List[str],
     ground_truths: List[str],
     eval_sampling_params: SamplingParams,
-    reward_fn: Callable[[str, str], float] = mmlu_reward,
+    reward_fn: Callable[[str, str], float] | None = mmlu_reward,
 ) -> List[EvalEntry]:
     batch_size = 32
     # get gpu memory maximum
@@ -140,7 +142,7 @@ def evaluate_vllm(
     for ground_truth, resp in tqdm(
         zip(ground_truths, responses), total=len(responses), desc="evaluating responses"
     ):
-        reward = reward_fn(resp, ground_truth)
+        reward = reward_fn(resp, ground_truth) if reward_fn is not None else 0.0
         eval_entry = EvalEntry(
             prompt=prompts[len(eval_entries)],
             response=resp,
@@ -193,9 +195,10 @@ def main(
     ),
 ):
     ground_truths: List[str] = []
+    prompts: List[str] = []
     eval_sampling_params = None
     if dataset == "mmlu":
-        ds = load_dataset("cais/mmlu", "all")
+        ds = load_dataset("data/mmlu", "all")
         test: Dataset = ds[split]  # type: ignore
         if limit > 0:
             test = test.select(range(limit))
@@ -204,8 +207,9 @@ def main(
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=2048, temperature=0.0, stop=["# Query:"]
         )
+        prompts = test["prompt"]  # type: ignore
     elif dataset == "gsm8k":
-        ds = load_dataset("gsm8k", "main")
+        ds = load_dataset("data/gsm8k")
         if split == "dev":
             split = "test"
         test: Dataset = ds[split]  # type: ignore
@@ -216,8 +220,20 @@ def main(
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=2048, temperature=0.0, stop=None
         )
+        prompts = test["prompt"]  # type: ignore
+    elif dataset == "alpaca":
+        ds = load_dataset("data/alpaca_eval")
+        test = ds["test"] # type: ignore
+        if limit > 0:
+            test = test.select(range(limit))
+        prompts = test["instruction"]  
+        ground_truths = test["output"] 
+        eval_sampling_params = get_evaluation_sample_params(
+            1, max_tokens=2048, temperature=0.0, stop=None
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}")
 
-    prompts = test["prompt"]  # type: ignore
     assert len(prompts) == len(ground_truths)
     assert eval_sampling_params is not None
 
@@ -229,16 +245,35 @@ def main(
         seed=42,
     )
 
+    reward_fn = None
+    if dataset == "mmlu":
+        reward_fn = mmlu_reward
+    elif dataset == "gsm8k":
+        reward_fn = gsm8k_reward
+
     eval_entries = evaluate_vllm(
         vllm_model=vlm,
         prompts=prompts,
         ground_truths=ground_truths,
         eval_sampling_params=eval_sampling_params,
-        reward_fn=mmlu_reward if dataset == "mmlu" else gsm8k_reward,
+        reward_fn=reward_fn,
     )
 
     with open(f"data/{dataset}_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
+    
+    if dataset == "alpaca":
+        eval_set = []
+        model_name = os.path.dirname(model_id).lower().replace("/", "_")
+        for entry, test_entry in zip(eval_entries, test):
+            eval_set.append({
+                "instruction": entry.prompt,
+                "output": entry.response,
+                "generator": model_name,
+                "dataset": test_entry["dataset"]
+            })
+        with open(f"data/alpaca_{model_name}.json", "w") as f:
+            json.dump(eval_set, f, indent=4)
 
 
 if __name__ == "__main__":
