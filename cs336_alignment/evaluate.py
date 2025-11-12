@@ -244,6 +244,8 @@ def main(
     elif dataset == "gsm8k":
         reward_fn = gsm8k_reward
 
+    import time
+    start_time = time.time()
     eval_entries = evaluate_vllm(
         vllm_model=vlm,
         prompts=prompts,
@@ -252,6 +254,9 @@ def main(
         reward_fn=reward_fn,
         batch_size=batch_size,
     )
+    end_time = time.time()
+    tps = len(prompts) / (end_time - start_time)
+    print_and_log(f"Total evaluation time: {end_time - start_time:.2f} seconds ({tps:.2f} samples/second)")
 
     with open(f"data/{dataset}_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
