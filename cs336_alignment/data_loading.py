@@ -38,7 +38,7 @@ class SFTDataset(torch.utils.data.Dataset):
         total_tokens = 0
         for item in d["tokens"]:
             total_tokens += len(item)
-        print_and_log(f"Total tokens in dataset: {total_tokens}")
+        print_and_log(f"Total tokens in dataset: {total_tokens:,}")
         
         all_tokens = np.zeros((total_tokens,), dtype=np.int32)
         start_idx = 0
@@ -76,3 +76,8 @@ if __name__ == "__main__":
         seq_len=512,
         shuffle=True,
     )
+
+    loader = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
+    for batch in loader:
+        print(batch)
+        break
