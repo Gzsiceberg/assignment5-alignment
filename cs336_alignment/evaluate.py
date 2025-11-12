@@ -35,7 +35,15 @@ def extract_mmlu_answer(response: str) -> str | None:
     # Extract the first word or character after "The correct answer is"
     answer = answer_part.split()[0].strip().strip(".").strip(",")
     if answer in {"A", "B", "C", "D"}:
-        return answer
+        match answer:
+            case "A":
+                return "0"
+            case "B":
+                return "1"
+            case "C":
+                return "2"
+            case "D":
+                return "3"
     return None
 
 
@@ -80,7 +88,7 @@ Answer:"""
 def mmlu_reward(response: str, ground_truth: str) -> float:
     answer = extract_mmlu_answer(response)
     if answer is None:
-        return 0.0
+        return -1.0
     return 1.0 if answer == ground_truth else 0.0
 
 
@@ -196,7 +204,7 @@ def main(
         if limit > 0:
             test = test.select(range(limit))
         test = test.map(gen_mmlu_prompt)
-        ground_truths = test["answer"]
+        ground_truths = list(map(str, test["answer"]))
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=1024, temperature=0.0, stop=["# Query:"]
         )
