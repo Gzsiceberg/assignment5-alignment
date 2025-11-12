@@ -198,14 +198,14 @@ def main(
     prompts: List[str] = []
     eval_sampling_params = None
     if dataset == "mmlu":
-        ds = load_dataset("data/mmlu", "all")
+        ds = load_dataset("cais/mmlu", "all")
         test: Dataset = ds[split]  # type: ignore
         if limit > 0:
             test = test.select(range(limit))
         test = test.map(gen_mmlu_prompt)
         ground_truths = test["answer"]
         eval_sampling_params = get_evaluation_sample_params(
-            1, max_tokens=2048, temperature=0.0, stop=["# Query:"]
+            1, max_tokens=1024, temperature=0.0, stop=["# Query:"]
         )
         prompts = test["prompt"]  # type: ignore
     elif dataset == "gsm8k":
@@ -218,7 +218,7 @@ def main(
         test = test.map(gen_gsm8k_prompt)
         ground_truths = test["answer"]
         eval_sampling_params = get_evaluation_sample_params(
-            1, max_tokens=2048, temperature=0.0, stop=None
+            1, max_tokens=1024, temperature=0.0, stop=None
         )
         prompts = test["prompt"]  # type: ignore
     elif dataset == "alpaca":
@@ -229,7 +229,7 @@ def main(
         prompts = test["instruction"]  
         ground_truths = test["output"] 
         eval_sampling_params = get_evaluation_sample_params(
-            1, max_tokens=2048, temperature=0.0, stop=None
+            1, max_tokens=1024, temperature=0.0, stop=None
         )
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
@@ -262,18 +262,30 @@ def main(
     with open(f"data/{dataset}_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
     
+    model_name = os.path.basename(os.path.dirname(model_id)).lower().replace("/", "_")
     if dataset == "alpaca":
-        eval_set = []
-        model_name = os.path.dirname(model_id).lower().replace("/", "_")
+        print_and_log(f"Saving Alpaca eval results for model {model_name}")
+        output = []
+        for example in test:
+            output.append({
+                "instruction": example["instruction"],
+                "output": example["output"],
+                "generator": example["generator"],
+                "dataset": example["dataset"]
+            })
+        with open(f"data/alpaca_reference.json", "w") as f:
+            json.dump(output, f, indent=4)
+
+        output = []
         for entry, test_entry in zip(eval_entries, test):
-            eval_set.append({
+            output.append({
                 "instruction": entry.prompt,
                 "output": entry.response,
                 "generator": model_name,
                 "dataset": test_entry["dataset"]
             })
         with open(f"data/alpaca_{model_name}.json", "w") as f:
-            json.dump(eval_set, f, indent=4)
+            json.dump(output, f, indent=4)
 
 
 if __name__ == "__main__":
