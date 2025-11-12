@@ -110,6 +110,10 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
         print_and_log("Running in test mode with limited data. Skipping training.")
         evaluate_model_on_dataset(llm, val_loader, train_device)
 
+    eval_interval = train_steps // config.eval_number
+    if eval_interval == 0:
+        eval_interval = train_steps // 10
+    print_and_log(f"Evaluation interval set to every {eval_interval} training iterations.")
     import time
     start_time = time.time()
     for epoch in tqdm(range(max_epochs)):
@@ -140,15 +144,16 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
             lr_scheduler.step()
             optimizer.zero_grad()
 
-            is_final_batch = (batch_idx == len(loader) - 1)
-
-            if batch_idx % 10 == 0 or is_final_batch:
+            if batch_idx % 10 == 0:
                 tpar.set_description(f"Loss: {total_loss.item():.4f}")
                 print_and_log(f"Epoch {epoch+1} Iter {batch_idx+1}/{len(loader)}, Loss: {total_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}")
             
-            if (batch_idx + 1) % config.eval_interval == 0 or is_final_batch:
+            if (batch_idx + 1) % eval_interval == 0:
                 print_and_log(f"--- Evaluation at Epoch {epoch+1} Iteration {batch_idx+1} ---")
                 evaluate_model_on_dataset(llm, val_loader, train_device)
+    
+    print_and_log("Final evaluation after training completion:")
+    evaluate_model_on_dataset(llm, val_loader, train_device)
     
     if not is_test:
         # Save the fine-tuned model
