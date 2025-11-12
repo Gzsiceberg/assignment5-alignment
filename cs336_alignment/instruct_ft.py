@@ -103,8 +103,10 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
 
     if not is_test:
         output_dir = f"{model_id}-fine-tuned"
-        os.makedirs(output_dir, exist_ok=True)
-        tokenizer.save_pretrained(output_dir)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+            llm.save_pretrained(output_dir) # type: ignore
+            tokenizer.save_pretrained(output_dir)
     
     if is_test:
         print_and_log("Running in test mode with limited data. Skipping training.")
