@@ -3,14 +3,19 @@ import dotenv
 import os
 import json
 import typer
-from tqdm import tqdm
+import asyncio
+from tqdm.asyncio import tqdm as atqdm
 from cs336_alignment.logger import setup_logging, print_and_log
 
 POE_API_KEY = dotenv.get_key(".env", "POE_API_KEY")
-client = openai.OpenAI(
+client = openai.AsyncOpenAI(
     api_key=POE_API_KEY,  # Get this from poe.com/api_key
     base_url="https://api.poe.com/v1",
 )
+
+# Semaphore to control max concurrency
+MAX_CONCURRENCY = 5
+semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
 
 system_prompt = """You are a helpful assistant that ranks models by the quality of their answers."""
@@ -37,29 +42,24 @@ Your response must be a valid Python list and should contain nothing else becaus
 """
 
 
-def llm_judge(data_path: str = typer.Argument("data/alpaca_qwen2.5-math-1.5b.json", help="Path to JSON file with model outputs to evaluate")):
-    eval_model_outputs = json.load(open(data_path, "r"))
-    reference_outputs = json.load(open("data/alpaca_reference.json", "r"))
+async def evaluate_single_example(d0: dict, d1: dict) -> dict:
+    """Evaluate a single example using the LLM judge with concurrency control."""
+    instruction = d1["instruction"]
+    output_1 = d1["output"]
+    output_2 = d0["output"]
+    model_name_1 = d1["generator"]
+    model_name_2 = d0["generator"]
 
-    total_num = len(reference_outputs)
-    print_and_log(f"Evaluating {total_num} examples...")
-    model_wins_count = {}
-    for d0, d1 in tqdm(zip(eval_model_outputs, reference_outputs), total=total_num):
-        instruction = d1["instruction"]
-        output_1 = d1["output"]
-        output_2 = d0["output"]
-        model_name_1 = d1["generator"]
-        model_name_2 = d0["generator"]
+    prompt = prompt_template.format(
+        instruction=instruction,
+        output_1=output_1,
+        output_2=output_2,
+        model_name_1=model_name_1,
+        model_name_2=model_name_2,
+    )
 
-        prompt = prompt_template.format(
-            instruction=instruction,
-            output_1=output_1,
-            output_2=output_2,
-            model_name_1=model_name_1,
-            model_name_2=model_name_2,
-        )
-
-        response = client.chat.completions.create(
+    async with semaphore:  # Control max concurrency
+        response = await client.chat.completions.create(
             model="gpt-5",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -72,26 +72,68 @@ def llm_judge(data_path: str = typer.Argument("data/alpaca_qwen2.5-math-1.5b.jso
             max_tokens=1024,
         )
 
-        reply_content: str = response.choices[0].message.content # type: ignore
-        try:
-            ranking = eval(reply_content)
-            print_and_log(f"Ranking: {ranking}")
-            for entry in ranking:
+    reply_content: str = response.choices[0].message.content  # type: ignore
+    
+    result = {
+        "ranking": None,
+        "error": None,
+        "model_name_1": model_name_1,
+        "model_name_2": model_name_2
+    }
+    
+    try:
+        ranking = eval(reply_content)
+        result["ranking"] = ranking
+        print_and_log(f"Ranking: {ranking}")
+    except Exception as e:
+        result["error"] = str(e)
+        print_and_log(f"Error evaluating response: {e}")
+        print_and_log(f"LLM Judge Response: {reply_content}")
+    
+    return result
+
+
+async def llm_judge_async(data_path: str):
+    """Async version of llm_judge that processes examples concurrently."""
+    eval_model_outputs = json.load(open(data_path, "r"))
+    reference_outputs = json.load(open("data/alpaca_reference.json", "r"))
+
+    total_num = len(reference_outputs)
+    print_and_log(f"Evaluating {total_num} examples with max concurrency {MAX_CONCURRENCY}...")
+    
+    # Create tasks for all examples
+    tasks = [
+        evaluate_single_example(d0, d1)
+        for d0, d1 in zip(eval_model_outputs, reference_outputs)
+    ]
+    
+    # Execute all tasks concurrently with progress bar
+    results = []
+    for coro in atqdm(asyncio.as_completed(tasks), total=total_num):
+        result = await coro
+        results.append(result)
+    
+    # Count wins
+    model_wins_count = {}
+    for result in results:
+        if result["ranking"] is not None:
+            for entry in result["ranking"]:
                 model = entry["model"]
                 rank = entry["rank"]
                 if model not in model_wins_count:
                     model_wins_count[model] = 0
                 if rank == 1:
                     model_wins_count[model] += 1
-        except Exception as e:
-            print_and_log(f"Error evaluating response: {e}")
-            print_and_log(f"LLM Judge Response: {reply_content}")
-            continue
 
     print_and_log("Final model win counts:")
     for model, wins in model_wins_count.items():
         win_rate = wins / total_num
         print_and_log(f"{model}: {wins} wins ({win_rate*100:.2f}%)")
+
+
+def llm_judge(data_path: str = typer.Argument("data/alpaca_qwen2.5-math-1.5b.json", help="Path to JSON file with model outputs to evaluate")):
+    """Wrapper function to run the async llm_judge."""
+    asyncio.run(llm_judge_async(data_path))
 
 if __name__ == "__main__":
     typer.run(llm_judge)
