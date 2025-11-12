@@ -93,10 +93,13 @@ async def evaluate_single_example(d0: dict, d1: dict) -> dict:
     return result
 
 
-async def llm_judge_async(data_path: str):
+async def alpaca_eval_async(data_path: str, limit: int = 0):
     """Async version of llm_judge that processes examples concurrently."""
     eval_model_outputs = json.load(open(data_path, "r"))
     reference_outputs = json.load(open("data/alpaca_reference.json", "r"))
+
+    eval_model_outputs = eval_model_outputs[:limit] if limit > 0 else eval_model_outputs
+    reference_outputs = reference_outputs[:limit] if limit > 0 else reference_outputs
 
     total_num = len(reference_outputs)
     print_and_log(f"Evaluating {total_num} examples with max concurrency {MAX_CONCURRENCY}...")
@@ -129,11 +132,22 @@ async def llm_judge_async(data_path: str):
     for model, wins in model_wins_count.items():
         win_rate = wins / total_num
         print_and_log(f"{model}: {wins} wins ({win_rate*100:.2f}%)")
+    
+    with open("data/alpaca_eval_results.json", "w") as f:
+        json.dump(results, f, indent=4)
 
+app = typer.Typer()
 
-def llm_judge(data_path: str = typer.Argument("data/alpaca_qwen2.5-math-1.5b.json", help="Path to JSON file with model outputs to evaluate")):
+@app.command()
+def alpaca_eval(data_path: str = typer.Argument("data/alpaca_qwen2.5-math-1.5b.json", help="Path to JSON file with model outputs to evaluate"),
+                limit: int = typer.Option(0, "-l", help="Limit the number of examples to evaluate")):
     """Wrapper function to run the async llm_judge."""
-    asyncio.run(llm_judge_async(data_path))
+    asyncio.run(alpaca_eval_async(data_path, limit))
+
+@app.command()
+def safe_eval():
+    print_and_log("This function is a placeholder for safe_eval functionality.")
+    pass
 
 if __name__ == "__main__":
-    typer.run(llm_judge)
+    app()
