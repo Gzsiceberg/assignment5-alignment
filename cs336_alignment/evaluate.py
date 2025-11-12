@@ -30,20 +30,12 @@ def extract_mmlu_answer(response: str) -> str | None:
     groups = response.split("The correct answer is")
     if len(groups) < 2:
         return None
-    answer_part = groups[1].strip()
+    answer_part = groups[1].strip().strip("```").strip()
 
     # Extract the first word or character after "The correct answer is"
-    answer = answer_part.split()[0].strip().strip(".").strip(",")
+    answer = answer_part.split()[0].strip().strip(".").strip(",").strip()
     if answer in {"A", "B", "C", "D"}:
-        match answer:
-            case "A":
-                return "0"
-            case "B":
-                return "1"
-            case "C":
-                return "2"
-            case "D":
-                return "3"
+        return answer
     return None
 
 
@@ -204,9 +196,10 @@ def main(
         if limit > 0:
             test = test.select(range(limit))
         test = test.map(gen_mmlu_prompt)
-        ground_truths = list(map(str, test["answer"]))
+        options = ["A", "B", "C", "D"]
+        ground_truths = list(map(lambda x: options[x], test["answer"]))
         eval_sampling_params = get_evaluation_sample_params(
-            1, max_tokens=1024, temperature=0.0, stop=["# Query:"]
+            1, max_tokens=1024, temperature=0.0, stop=["```"]
         )
         prompts = test["prompt"]  # type: ignore
     elif dataset == "gsm8k":
