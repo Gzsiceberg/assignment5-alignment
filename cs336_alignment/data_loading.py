@@ -15,9 +15,11 @@ prompt_template = """Below is an instruction that describes a task. Write a resp
 
 
 class SFTDataset(torch.utils.data.Dataset):
-    def __init__(self, tokenizer: PreTrainedTokenizerBase, dataset_path: str | os.PathLike, seq_len: int, shuffle=True):
+    def __init__(self, tokenizer: PreTrainedTokenizerBase, dataset_path: str | os.PathLike, seq_len: int, shuffle=True, limit: int = 0):
         ds = load_dataset("json", data_files=str(dataset_path))
         d: Dataset = ds["train"]  # type: ignore
+        if limit > 0:
+            d = d.select(range(limit))
         d = d.map(
             lambda x: {
                 "input": prompt_template.format(
@@ -65,7 +67,7 @@ class SFTDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx) -> dict[str, torch.Tensor]:
         return {"input_ids": self.input_ids_list[idx], "labels": self.labels_list[idx]}
-
+    
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(
         "models/LLM-Research/Meta-Llama-3.1-8B/"

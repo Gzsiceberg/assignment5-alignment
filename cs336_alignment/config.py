@@ -37,6 +37,15 @@ class ExpertIterConfig(BaseModel):
     do_rollout: bool = True
     global_optimization: bool = False
 
+class InstructionFineTuningConfig(BaseModel):
+    model_id: str = "models/LLM-Research/Meta-Llama-3.1-8B"
+    lr: float = 1e-5
+    batch_size: int = 64
+    gradient_accumulation_steps: int = 32
+    epochs: int = 3
+    seq_len: int = 512
+    use_compile: bool = False
+
 
 def load_config_from_file(config_path: str) -> dict:
     """Load configuration from a file and return as a dictionary"""
