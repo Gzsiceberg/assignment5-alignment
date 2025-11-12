@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+import pickle
 import openai
 import dotenv
 import os
@@ -41,21 +43,30 @@ Now please rank the models by the quality of their answers, so that the model wi
 Your response must be a valid Python list and should contain nothing else because we will directly execute it in Python. Please provide the ranking that the majority of humans would give.
 """
 
+@dataclass
+class AlpacaEvalResult:
+    reward: int
+    error: str | None
+    ref_model_name: str
+    eval_model_name: str
+    ref_output: str 
+    eval_output: str 
 
-async def evaluate_single_example(d0: dict, d1: dict) -> dict:
+
+async def evaluate_single_example(eval_data: dict, ref_data: dict) -> dict:
     """Evaluate a single example using the LLM judge with concurrency control."""
-    instruction = d1["instruction"]
-    output_1 = d1["output"]
-    output_2 = d0["output"]
-    model_name_1 = d1["generator"]
-    model_name_2 = d0["generator"]
+    instruction = ref_data["instruction"]
+    ref_output = ref_data["output"]
+    eval_output = eval_data["output"]
+    ref_model_name = ref_data["generator"]
+    eval_model_name = eval_data["generator"]
 
     prompt = prompt_template.format(
         instruction=instruction,
-        output_1=output_1,
-        output_2=output_2,
-        model_name_1=model_name_1,
-        model_name_2=model_name_2,
+        output_1=ref_output,
+        output_2=eval_output,
+        model_name_1=ref_model_name,
+        model_name_2=eval_model_name,
     )
 
     async with semaphore:  # Control max concurrency
@@ -77,8 +88,8 @@ async def evaluate_single_example(d0: dict, d1: dict) -> dict:
     result = {
         "ranking": None,
         "error": None,
-        "model_name_1": model_name_1,
-        "model_name_2": model_name_2
+        "ref_model_name": ref_model_name,
+        "eval_model_name": eval_model_name
     }
     
     try:
@@ -98,6 +109,8 @@ async def alpaca_eval_async(data_path: str, limit: int = 0):
     eval_model_outputs = json.load(open(data_path, "r"))
     reference_outputs = json.load(open("data/alpaca_reference.json", "r"))
 
+    eval_model_name = eval_model_outputs[0]["generator"]
+
     eval_model_outputs = eval_model_outputs[:limit] if limit > 0 else eval_model_outputs
     reference_outputs = reference_outputs[:limit] if limit > 0 else reference_outputs
 
@@ -106,10 +119,11 @@ async def alpaca_eval_async(data_path: str, limit: int = 0):
     
     # Create tasks for all examples
     tasks = [
-        evaluate_single_example(d0, d1)
-        for d0, d1 in zip(eval_model_outputs, reference_outputs)
+        evaluate_single_example(eval_data, ref_data)
+        for eval_data, ref_data in zip(eval_model_outputs, reference_outputs)
     ]
     
+    eval_results: list[AlpacaEvalResult] = []
     # Execute all tasks concurrently with progress bar
     results = []
     for coro in atqdm(asyncio.as_completed(tasks), total=total_num):
@@ -118,8 +132,18 @@ async def alpaca_eval_async(data_path: str, limit: int = 0):
     
     # Count wins
     model_wins_count = {}
-    for result in results:
-        if result["ranking"] is not None:
+    for t, result in enumerate(results):
+        eval_result: AlpacaEvalResult = AlpacaEvalResult(
+            reward=0,
+            error=result.get("error"),
+            ref_model_name=result["ref_model_name"],
+            eval_model_name=result["eval_model_name"],
+            ref_output=reference_outputs[t]["output"],
+            eval_output=eval_model_outputs[t]["output"],
+        )
+        if result["ranking"] is None:
+            eval_result.reward = -1
+        else:
             for entry in result["ranking"]:
                 model = entry["model"]
                 rank = entry["rank"]
@@ -127,14 +151,17 @@ async def alpaca_eval_async(data_path: str, limit: int = 0):
                     model_wins_count[model] = 0
                 if rank == 1:
                     model_wins_count[model] += 1
+                    if model == eval_model_name:
+                        eval_result.reward = 1
+        eval_results.append(eval_result)
 
     print_and_log("Final model win counts:")
     for model, wins in model_wins_count.items():
         win_rate = wins / total_num
         print_and_log(f"{model}: {wins} wins ({win_rate*100:.2f}%)")
     
-    with open("data/alpaca_eval_results.json", "w") as f:
-        json.dump(results, f, indent=4)
+    with open("data/alpaca_eval_results.pkl", "wb") as f:
+        pickle.dump(eval_results, f)
 
 app = typer.Typer()
 
