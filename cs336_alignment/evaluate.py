@@ -180,7 +180,7 @@ def main(
     ),
     dataset: str = typer.Option("mmlu", "-d", help="Dataset ID"),
     split: str = typer.Option(
-        "dev", "-s", help="Dataset split to use (train, dev, test)"
+        "test", "-s", help="Dataset split to use (train, dev, test)"
     ),
     limit: int = typer.Option(
         0, "-l", help="Limit number of evaluation samples (0 means no limit)"
