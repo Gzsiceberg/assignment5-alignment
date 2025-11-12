@@ -114,16 +114,8 @@ def evaluate_vllm(
     ground_truths: List[str],
     eval_sampling_params: SamplingParams,
     reward_fn: Callable[[str, str], float] | None = mmlu_reward,
+    batch_size: int = 32,
 ) -> List[EvalEntry]:
-    batch_size = 32
-    # get gpu memory maximum
-    gpu_memory_max = torch.cuda.get_device_properties(0).total_memory / (
-        1024**3
-    )  # in GB
-    if gpu_memory_max >= 48:
-        batch_size = 128
-    elif gpu_memory_max >= 24:
-        batch_size = 64
     num_batches = (len(prompts) + batch_size - 1) // batch_size
     responses: List[str] = []
     for i in tqdm(range(num_batches), desc="generating responses"):
@@ -193,6 +185,7 @@ def main(
     limit: int = typer.Option(
         0, "-l", help="Limit number of evaluation samples (0 means no limit)"
     ),
+    batch_size: int = typer.Option(32, "-b", help="Batch size for evaluation"),
 ):
     ground_truths: List[str] = []
     prompts: List[str] = []
@@ -257,6 +250,7 @@ def main(
         ground_truths=ground_truths,
         eval_sampling_params=eval_sampling_params,
         reward_fn=reward_fn,
+        batch_size=batch_size,
     )
 
     with open(f"data/{dataset}_eval_results.pkl", "wb") as f:
