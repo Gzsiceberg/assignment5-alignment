@@ -13,7 +13,7 @@ import torch.nn.functional as F
 
 def evaluate_model_on_dataset(llm: AutoModelForCausalLM, loader: torch.utils.data.DataLoader, device: str):
     llm.eval()
-    total_loss = 0.0
+    total_loss = torch.tensor(0.0, device=device)
     total_count: int = 0
     with torch.inference_mode(True):
         for batch in tqdm(loader, total=len(loader), desc="Evaluating", leave=False):
@@ -24,10 +24,10 @@ def evaluate_model_on_dataset(llm: AutoModelForCausalLM, loader: torch.utils.dat
             vocab_size = logits.size(-1)
             loss = F.cross_entropy(logits.view(-1, vocab_size), labels.view(-1))
             assert loss.dim() == 0, f"Loss dimension expected to be 0, got {loss.dim()}"
-            total_loss += loss.item()
+            total_loss += loss
             total_count += 1
 
-    avg_loss = total_loss / total_count
+    avg_loss = total_loss.item() / total_count
     perplexity = np.exp(avg_loss)
     print_and_log(f"Evaluation Loss: {avg_loss:.4f}, Perplexity: {perplexity:.4f}")
     llm.train()
