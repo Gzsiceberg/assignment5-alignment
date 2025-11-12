@@ -116,6 +116,7 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
     print_and_log(f"Evaluation interval set to every {eval_interval} training iterations.")
     import time
     start_time = time.time()
+    moving_avg_loss = torch.tensor(0.0, device=train_device)
     for epoch in tqdm(range(max_epochs)):
         for batch_idx, batch in (tpar:= tqdm(enumerate(loader), total=len(loader))):
             input_ids: torch.Tensor = batch["input_ids"].to(train_device)
@@ -137,6 +138,7 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
                     loss.backward()
                     total_loss += loss.detach()
             
+            moving_avg_loss = 0.9 * moving_avg_loss.detach() + 0.1 * total_loss.detach()
             grad_norm = torch.nn.utils.clip_grad_norm_(llm.parameters(), max_norm=1.0) # type: ignore
             
             current_lr = lr_scheduler.get_last_lr()[0]
@@ -145,8 +147,8 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
             optimizer.zero_grad()
 
             if batch_idx % 10 == 0:
-                tpar.set_description(f"Loss: {total_loss.item():.4f}")
-                print_and_log(f"Epoch {epoch+1} Iter {batch_idx+1}/{len(loader)}, Loss: {total_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}")
+                tpar.set_description(f"Loss: {moving_avg_loss.item():.4f}")
+                print_and_log(f"Epoch {epoch+1} Iter {batch_idx+1}/{len(loader)}, Loss: {moving_avg_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}")
             
             if (batch_idx + 1) % eval_interval == 0:
                 print_and_log(f"--- Evaluation at Epoch {epoch+1} Iteration {batch_idx+1} ---")
