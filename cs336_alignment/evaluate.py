@@ -148,10 +148,10 @@ def evaluate_vllm(
             correct_count += 1
     accuracy = correct_count / len(responses)
     fail_rate = failed_count / len(responses)
-    print_and_log(
-        f"Evaluation on {len(responses)} examples: accuracy={accuracy*100:.2f}% failrate={fail_rate*100:.2f}%"
-    )
-
+    if reward_fn is not None:
+        print_and_log(
+            f"Evaluation on {len(responses)} examples: accuracy={accuracy*100:.2f}% failrate={fail_rate*100:.2f}%"
+        )
     return eval_entries
 
 
@@ -225,6 +225,16 @@ def main(
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=1024, temperature=0.0, stop=None
         )
+    elif dataset == "sst":
+        ds = load_dataset("data/simple_safety_tests")
+        test = ds["test"]  # type: ignore
+        if limit > 0:
+            test = test.select(range(limit))
+        prompts = test["prompts_final"]
+        ground_truths = [""] * len(prompts) # dummy ground truths for sst
+        eval_sampling_params = get_evaluation_sample_params(
+            1, max_tokens=1024, temperature=0.0, stop=None
+        )
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -263,7 +273,18 @@ def main(
         pickle.dump(eval_entries, f)
     
     model_name = os.path.basename(os.path.dirname(model_id)).lower().replace("/", "_")
-    if dataset == "alpaca":
+    if dataset == "sst":
+        print_and_log(f"Saving SST eval results for model {model_name}")
+        output = []
+        for example, entry in zip(test, eval_entries):
+            output.append({
+                "prompts_final": example["prompts_final"], # type: ignore
+                "generator": model_name,
+                "responses": entry.response,
+            })
+        with open(f"data/sst_{model_name}.json", "w") as f:
+            json.dump(output, f, indent=4)
+    elif dataset == "alpaca":
         print_and_log(f"Saving Alpaca eval results for model {model_name}")
         output = []
         for example in test:
