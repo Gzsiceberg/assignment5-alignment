@@ -89,7 +89,9 @@ async def evaluate_single_example(eval_data: dict, ref_data: dict) -> dict:
         "ranking": None,
         "error": None,
         "ref_model_name": ref_model_name,
-        "eval_model_name": eval_model_name
+        "eval_model_name": eval_model_name,
+        "ref_output": ref_output,
+        "eval_output": eval_output,
     }
     
     try:
@@ -132,14 +134,14 @@ async def alpaca_eval_async(data_path: str, limit: int = 0):
     
     # Count wins
     model_wins_count = {}
-    for t, result in enumerate(results):
+    for result in results:
         eval_result: AlpacaEvalResult = AlpacaEvalResult(
             reward=0,
             error=result.get("error"),
             ref_model_name=result["ref_model_name"],
             eval_model_name=result["eval_model_name"],
-            ref_output=reference_outputs[t]["output"],
-            eval_output=eval_model_outputs[t]["output"],
+            ref_output=result["ref_output"],
+            eval_output=result["eval_output"],
         )
         if result["ranking"] is None:
             eval_result.reward = -1
