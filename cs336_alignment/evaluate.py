@@ -186,7 +186,7 @@ def main(
     model_id: str = typer.Argument(
         "models/LLM-Research/Meta-Llama-3.1-8B", help="Model ID"
     ),
-    dataset: str = typer.Argument("mmlu", help="Dataset ID"),
+    dataset: str = typer.Option("mmlu", "-d", help="Dataset ID"),
     split: str = typer.Option(
         "dev", "-s", help="Dataset split to use (train, dev, test)"
     ),
@@ -268,10 +268,10 @@ def main(
         output = []
         for example in test:
             output.append({
-                "instruction": example["instruction"],
-                "output": example["output"],
-                "generator": example["generator"],
-                "dataset": example["dataset"]
+                "instruction": example["instruction"], # type: ignore
+                "output": example["output"],        # type: ignore
+                "generator": example["generator"], # type: ignore
+                "dataset": example["dataset"]       # type: ignore
             })
         with open(f"data/alpaca_reference.json", "w") as f:
             json.dump(output, f, indent=4)
@@ -282,7 +282,7 @@ def main(
                 "instruction": entry.prompt,
                 "output": entry.response,
                 "generator": model_name,
-                "dataset": test_entry["dataset"]
+                "dataset": test_entry["dataset"] # type: ignore
             })
         with open(f"data/alpaca_{model_name}.json", "w") as f:
             json.dump(output, f, indent=4)
