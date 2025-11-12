@@ -9,11 +9,12 @@ import asyncio
 from tqdm.asyncio import tqdm as atqdm
 from cs336_alignment.logger import setup_logging, print_and_log
 
-POE_API_KEY = dotenv.get_key(".env", "POE_API_KEY")
-client = openai.AsyncOpenAI(
-    api_key=POE_API_KEY,  # Get this from poe.com/api_key
-    base_url="https://api.poe.com/v1",
-)
+if __name__ == "__main__":
+    POE_API_KEY = dotenv.get_key(".env", "POE_API_KEY")
+    client = openai.AsyncOpenAI(
+        api_key=POE_API_KEY,  # Get this from poe.com/api_key
+        base_url="https://api.poe.com/v1",
+    )
 
 # Semaphore to control max concurrency
 MAX_CONCURRENCY = 5
@@ -48,6 +49,7 @@ Your response must be a valid Python list and should contain nothing else becaus
 
 @dataclass
 class AlpacaEvalResult:
+    instruction: str
     reward: int
     error: str | None
     ref_model_name: str
@@ -91,6 +93,7 @@ async def evaluate_single_example(eval_data: dict, ref_data: dict) -> dict:
     result = {
         "ranking": None,
         "error": None,
+        "instruction": instruction,
         "ref_model_name": ref_model_name,
         "eval_model_name": eval_model_name,
         "ref_output": ref_output,
@@ -142,6 +145,7 @@ async def alpaca_eval_async(data_path: str, limit: int = 0):
     for result in results:
         eval_result: AlpacaEvalResult = AlpacaEvalResult(
             reward=0,
+            instruction=result["instruction"],
             error=result.get("error"),
             ref_model_name=result["ref_model_name"],
             eval_model_name=result["eval_model_name"],
