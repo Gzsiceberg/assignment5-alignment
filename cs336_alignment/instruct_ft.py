@@ -11,6 +11,27 @@ from tqdm import tqdm, trange
 from cs336_alignment.data_loading import SFTDataset
 import torch.nn.functional as F
 
+def evaluate_model_on_dataset(llm: AutoModelForCausalLM, loader: torch.utils.data.DataLoader, device: str):
+    llm.eval()
+    total_loss = 0.0
+    total_count: int = 0
+    with torch.inference_mode(True):
+        for batch in tqdm(loader, total=len(loader), desc="Evaluating", leave=False):
+            input_ids: torch.Tensor = batch["input_ids"].to(device)
+            labels: torch.Tensor = batch["labels"].to(device)
+            logits = llm(input_ids).logits  # type: ignore
+
+            vocab_size = logits.size(-1)
+            loss = F.cross_entropy(logits.view(-1, vocab_size), labels.view(-1))
+            assert loss.dim() == 0, f"Loss dimension expected to be 0, got {loss.dim()}"
+            total_loss += loss.item()
+            total_count += 1
+
+    avg_loss = total_loss / total_count
+    perplexity = np.exp(avg_loss)
+    print_and_log(f"Evaluation Loss: {avg_loss:.4f}, Perplexity: {perplexity:.4f}")
+    llm.train()
+
 def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Path to configuration file"),
          seed: int = typer.Option(42, "-s", help="Random seed for reproducibility"),
          limit: int = typer.Option(0, "-l", help="Limit the number of training samples (0 for no limit)")):
@@ -48,9 +69,18 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
         limit=limit,
     )
 
+    val_dataset = SFTDataset(
+        tokenizer,
+        dataset_path="data/sft/test.jsonl",
+        seq_len=seq_len,
+        shuffle=False,
+        limit=limit,
+    )
+
     total_samples = len(dataset)
-    print_and_log(f"Total training samples: {total_samples}")
+    print_and_log(f"Total training samples: {total_samples} Total validation samples: {len(val_dataset)}")
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=4, shuffle=False, drop_last=True)
 
 
     if config.use_compile:
@@ -61,7 +91,7 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
     micro_batch_size = batch_size // gradient_accumulation_steps
     train_steps = len(loader) * max_epochs
     vocab_size = tokenizer.vocab_size
-    print_and_log(f"Vocabulary size: {vocab_size}, Training steps: {train_steps}, Micro-batch size: {micro_batch_size}")
+    print_and_log(f"Vocabulary size: {vocab_size:,}, Training steps: {train_steps:,}, Micro-batch size: {micro_batch_size}")
 
     optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr) # type: ignore
     from transformers import get_cosine_schedule_with_warmup  # type: ignore
@@ -75,6 +105,11 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
         output_dir = f"{model_id}-fine-tuned"
         os.makedirs(output_dir, exist_ok=True)
         tokenizer.save_pretrained(output_dir)
+    
+    if is_test:
+        print_and_log("Running in test mode with limited data. Skipping training.")
+        evaluate_model_on_dataset(llm, val_loader, train_device)
+
     import time
     start_time = time.time()
     for epoch in tqdm(range(max_epochs)):
@@ -105,9 +140,15 @@ def main(config_path: str = typer.Argument("config/instruction/t.yaml", help="Pa
             lr_scheduler.step()
             optimizer.zero_grad()
 
-            if batch_idx % 10 == 0:
+            is_final_batch = (batch_idx == len(loader) - 1)
+
+            if batch_idx % 10 == 0 or is_final_batch:
                 tpar.set_description(f"Loss: {total_loss.item():.4f}")
                 print_and_log(f"Epoch {epoch+1} Iter {batch_idx+1}/{len(loader)}, Loss: {total_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}")
+            
+            if (batch_idx + 1) % config.eval_interval == 0 or is_final_batch:
+                print_and_log(f"--- Evaluation at Epoch {epoch+1} Iteration {batch_idx+1} ---")
+                evaluate_model_on_dataset(llm, val_loader, train_device)
     
     if not is_test:
         # Save the fine-tuned model

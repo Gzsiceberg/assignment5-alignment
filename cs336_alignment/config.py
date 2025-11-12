@@ -45,6 +45,7 @@ class InstructionFineTuningConfig(BaseModel):
     epochs: int = 3
     seq_len: int = 512
     use_compile: bool = False
+    eval_interval: int = 1000
 
 
 def load_config_from_file(config_path: str) -> dict:
