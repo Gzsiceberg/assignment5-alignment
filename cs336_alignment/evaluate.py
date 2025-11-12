@@ -227,9 +227,9 @@ def main(
         )
     elif dataset == "sst":
         ds = load_dataset("data/simple_safety_tests")
-        test = ds["test"]  # type: ignore
+        test = ds["train"] # type: ignore
         if limit > 0:
-            test = test.select(range(limit))
+            test = test.select(range(limit))  # type: ignore
         prompts = test["prompts_final"]
         ground_truths = [""] * len(prompts) # dummy ground truths for sst
         eval_sampling_params = get_evaluation_sample_params(
@@ -278,9 +278,9 @@ def main(
         output = []
         for example, entry in zip(test, eval_entries):
             output.append({
-                "prompts_final": example["prompts_final"], # type: ignore
+                "prompts": example["prompts_final"], # type: ignore
                 "generator": model_name,
-                "responses": entry.response,
+                "output": entry.response,
             })
         with open(f"data/sst_{model_name}.json", "w") as f:
             json.dump(output, f, indent=4)
