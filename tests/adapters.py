@@ -355,7 +355,13 @@ def get_packed_sft_dataset(
         "input_ids" contains the token IDs for the language modeling inputs, and "labels" contains
         the token IDs for the language modeling labels.
     """
-    raise NotImplementedError
+    from cs336_alignment.data_loading import SFTDataset
+    return SFTDataset(
+        tokenizer,
+        dataset_path,
+        seq_length,
+        shuffle,
+    )
 
 
 def run_iterate_batches(

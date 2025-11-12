@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def test_packed_sft_dataset():
     sft_sample_path = FIXTURES_PATH / "sft_sample.jsonl"
-    tokenizer = AutoTokenizer.from_pretrained(FIXTURES_PATH / "Meta-Llama-3-8B")
+    tokenizer = AutoTokenizer.from_pretrained("models/LLM-Research/Meta-Llama-3.1-8B")
     seq_length = 32
     packed_sft_dataset = get_packed_sft_dataset(
         tokenizer=tokenizer,
