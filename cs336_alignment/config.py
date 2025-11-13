@@ -45,7 +45,7 @@ class InstructionFineTuningConfig(BaseModel):
     epochs: int = 3
     seq_len: int = 512
     use_compile: bool = False
-    eval_number: int = 50
+    eval_number: int = 30
 
 class LoraParaConfig(BaseModel):
     r: int = 8
