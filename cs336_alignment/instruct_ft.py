@@ -1,3 +1,4 @@
+import shutil
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 import torch
@@ -161,7 +162,6 @@ def main(
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
         llm.save_pretrained(checkpoint_dir)  # type: ignore
-        tokenizer.save_pretrained(checkpoint_dir)
 
     checkpoint_path = f"{checkpoint_dir}/checkpoint.pth"
     if resume:
@@ -246,13 +246,19 @@ def main(
                     f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
                 )
                 evaluate_model_on_dataset(llm, val_loader, train_device, 0.05)
-                llm.save_pretrained(checkpoint_dir)  # type: ignore
+                tmp_checkpoint_dir = f"{checkpoint_dir}_temp"
+                if not os.path.exists(tmp_checkpoint_dir):
+                    os.makedirs(tmp_checkpoint_dir, exist_ok=True)
+                tmp_checkpoint_path = f"{tmp_checkpoint_dir}/checkpoint.pth"
+
+                llm.save_pretrained(tmp_checkpoint_dir)  # type: ignore
                 save_checkpoint(
                     optimizer,
                     lr_scheduler,
                     last_iter=itr,
-                    checkpoint_path=checkpoint_path,
+                    checkpoint_path=tmp_checkpoint_path,
                 )
+                shutil.move(tmp_checkpoint_dir, checkpoint_dir)
             last_train_iter += 1
 
     print_and_log("Final evaluation after training completion:")
@@ -260,7 +266,9 @@ def main(
 
     if not is_test:
         # Save the fine-tuned model
+        save_checkpoint(optimizer, lr_scheduler, last_iter=last_train_iter, checkpoint_path=checkpoint_path,)
         llm.save_pretrained(checkpoint_dir)  # type: ignore
+        tokenizer.save_pretrained(checkpoint_dir)
         print_and_log(f"Fine-tuned model saved to {checkpoint_dir}")
     end_time = time.time()
     elapsed_time = end_time - start_time
