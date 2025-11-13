@@ -128,10 +128,7 @@ def main(
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
-    # llm.config.use_cache = False  # disable cache for training
-    # print_and_log(f"is_gradient_checkpointing before: {llm.is_gradient_checkpointing}")
-    # llm.gradient_checkpointing_enable()
-    # print_and_log(f"is_gradient_checkpointing after: {llm.is_gradient_checkpointing}")
+    llm.config.use_cache = False  # disable cache for training
     
     print_gpu_memory("After model loading")
 
@@ -167,11 +164,6 @@ def main(
         torch.set_float32_matmul_precision("high")
         llm = torch.compile(llm)  # type: ignore
         print_and_log("Model compiled with torch.compile")
-    else:
-        # Enable gradient checkpointing ONLY if not using compile
-        # In transformers 4.57+, gradient_checkpointing conflicts with torch.compile
-        llm.gradient_checkpointing_enable()
-        print_and_log("Gradient checkpointing enabled (compile disabled)")
 
     assert (
         batch_size % gradient_accumulation_steps == 0
