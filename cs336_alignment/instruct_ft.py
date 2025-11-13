@@ -321,7 +321,7 @@ def do_grad_accumulate(
             end_idx = (s + 1) * micro_batch_size
             input_ids_mb = input_ids[start_idx:end_idx]
             labels_mb = labels[start_idx:end_idx]
-            logits = llm(input_ids_mb).logits  # type: ignore
+            logits: torch.Tensor = llm(input_ids_mb).logits  # type: ignore
             vocab_size = logits.size(-1)
             assert logits.shape == (
                 micro_batch_size,
