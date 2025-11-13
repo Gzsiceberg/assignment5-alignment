@@ -79,7 +79,8 @@ def main(
     limit: int = typer.Option(
         0, "-l", help="Limit the number of training samples (0 for no limit)"
     ),
-    resume: bool = typer.Option(False, "-r", help="Resume training from checkpoint")
+    resume: bool = typer.Option(False, "-r", help="Resume training from checkpoint"),
+    shutdown: bool = typer.Option(False, "-d", help="Shutdown after training")
 ):
 
     config = load_config_from_file(config_path)
@@ -280,6 +281,9 @@ def main(
     elapsed_time = end_time - start_time
     print_and_log(f"Training completed in {elapsed_time/60:.2f} minutes.")
 
+    if shutdown:
+        print_and_log("Shutting down the system as requested.")
+        os.system("runpodctl stop pod $RUNPOD_POD_ID")
 
 if __name__ == "__main__":
     typer.run(main)
