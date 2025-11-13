@@ -1,0 +1,4 @@
+model_id: "models/Qwen/Qwen2.5-0.5B"
+lr: 1e-6
+gradient_accumulation_steps: 64
+use_compile: true

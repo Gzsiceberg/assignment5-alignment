@@ -238,7 +238,7 @@ def train(
     if shutdown:
         print_and_log("Shutdown after training is enabled.")
 
-    is_test = "_test.yaml" in config_name.lower()
+    is_test = "_test" in config_name.lower()
 
     gpu_count = torch.cuda.device_count()
     model_id = dpo_config.model_id
