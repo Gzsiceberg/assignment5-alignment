@@ -47,6 +47,12 @@ class InstructionFineTuningConfig(BaseModel):
     use_compile: bool = False
     eval_number: int = 50
 
+class DPOConfig(BaseModel):
+    model_id: str = "models/Qwen/Qwen2.5-0.5B"
+    lr: float = 1e-6
+    gradient_accumulation_steps: int = 64
+    use_compile: bool = True
+
 
 def load_config_from_file(config_path: str) -> dict:
     """Load configuration from a file and return as a dictionary"""

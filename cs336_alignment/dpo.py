@@ -1,6 +1,7 @@
 import os
 import torch
-from transformers import PreTrainedTokenizerBase
+from transformers import PreTrainedTokenizerBase, AutoModelForCausalLM, AutoTokenizer
+from cs336_alignment.config import DPOConfig, load_config_from_file
 from cs336_alignment.logger import setup_logging, print_and_log
 import random
 import numpy as np
@@ -8,6 +9,8 @@ import typer
 from tqdm import tqdm, trange
 import torch.nn.functional as F
 from cs336_alignment.sft_helper import get_response_log_probs
+from tqdm import tqdm, trange
+import datasets
 
 
 prompt_template = """Below is an instruction that describes a task. Write a response that appropriately completes the request.
@@ -152,26 +155,139 @@ def dpo_loss(
     )
 
 
-if __name__ == "__main__":
-    from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+def eval_dpo_loss(
+    policy_model: torch.nn.Module,
+    ref_model: torch.nn.Module,
+    tokenizer: PreTrainedTokenizerBase,
+    beta: float,
+    dataset: datasets.Dataset,
+) -> float:
+    with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        total_loss = 0.0
+        for example in dataset:
+            prompt = example["prompt"]  # type: ignore
+            response_chosen = example["good"]  # type: ignore
+            response_rejected = example["bad"]  # type: ignore
 
-    FIXTURES_PATH = os.path.join(os.path.dirname(__file__), "..", "tests", "fixtures")
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+            loss = dpo_loss(
+                policy_model,
+                ref_model,
+                tokenizer,
+                beta,
+                prompt,
+                response_chosen,
+                response_rejected,
+            )
+            total_loss += loss.item()
+    avg_loss = total_loss / len(dataset)
+    return avg_loss
 
-    model = AutoModelForCausalLM.from_pretrained(f"{FIXTURES_PATH}/tiny-gpt2")
-    model_ref = AutoModelForCausalLM.from_pretrained(f"{FIXTURES_PATH}/tiny-gpt2-ref")
 
-    prompt = "The quick brown fox jumps over"
-    good_response = "the lazy dog."
-    bad_response = "their crazy frog."
+def train(config_path: str = typer.Argument("configs/dpo.yaml", help="Path to config file"),
+          limit: int = typer.Option(-1, "-l", help="Limit number of training examples (-1 for no limit)")):
+    
+    config = load_config_from_file(config_path)
+    dpo_config = DPOConfig(**config)
+    config_name = os.path.splitext(os.path.basename(config_path))[0]
+    setup_logging(f"dpo_{config_name}.log")
 
-    loss = dpo_loss(
-        model,
-        model_ref,
-        tokenizer,
-        0.5,
-        prompt,
-        good_response,
-        bad_response,
+    is_test = "_test.yaml" in config_name.lower()
+
+    gpu_count = torch.cuda.device_count()
+    model_id = dpo_config.model_id
+    use_compile = dpo_config.use_compile
+
+    output_model_id = f"{dpo_config.model_id}-dpo-finetuned"
+    train_device = "cuda:0"
+    ref_device = "cuda:1" if gpu_count > 1 else "cuda:0"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+    llm: torch.nn.Module = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+        device_map={"": train_device},
     )
-    print(f"DPO loss: {loss.item():.4f}")
+
+    llm_ref: torch.nn.Module = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+        device_map={"": ref_device},
+    )
+
+    if use_compile:
+        llm = torch.compile(llm) # type: ignore
+        llm_ref = torch.compile(llm_ref) # type: ignore
+
+    from cs336_alignment.dpo_data import get_full_dataset
+    train_ds, test_ds = get_full_dataset()
+    if limit > 0:
+        train_ds = train_ds.select(range(limit))
+
+    train_ds = train_ds.shuffle()
+    optimizer = torch.optim.RMSprop(llm.parameters(), lr=dpo_config.lr) # type: ignore
+    gradient_accumulation_steps = dpo_config.gradient_accumulation_steps
+    training_steps = len(train_ds)
+    eval_steps = training_steps // 100 if not is_test else 10
+
+    if not os.path.exists(output_model_id):
+        os.makedirs(output_model_id)
+        tokenizer.save_pretrained(output_model_id)
+
+    import time
+    start_time = time.time()
+    for itr, example in tqdm(enumerate(train_ds), total=training_steps):
+        prompt = example["prompt"] # type: ignore
+        response_chosen = example["good"] # type: ignore
+        response_rejected = example["bad"] # type: ignore
+
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            loss = dpo_loss(
+                llm,
+                llm_ref,
+                tokenizer,
+                beta=0.1,
+                prompt=prompt,
+                response_chosen=response_chosen,
+                response_rejected=response_rejected,
+            )
+            loss.backward()
+        
+        if (itr + 1) % gradient_accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            print_and_log(f"Iter={itr}/{training_steps} loss={loss.item():,}")
+        
+        if (itr + 1) % eval_steps == 0 or (itr + 1) % gradient_accumulation_steps == 0:
+            # Evaluation code can be added here
+            eval_loss = eval_dpo_loss(
+                llm,
+                llm_ref,
+                tokenizer,
+                beta=0.1,
+                dataset=test_ds,
+            )
+            print_and_log(f"Eval loss at iter {itr}: {eval_loss:,}")
+    
+    # Save final model
+    llm.save_pretrained(output_model_id)
+    tokenizer.save_pretrained(output_model_id)
+
+    final_eval_loss = eval_dpo_loss(
+        llm,
+        llm_ref,
+        tokenizer,
+        beta=0.1,
+        dataset=test_ds,
+    )
+    print_and_log(f"Final eval loss: {final_eval_loss:,}")
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    elapsed_time_hours = elapsed_time / 3600
+    print_and_log(f"Total training time: {elapsed_time_hours:.2f} hours")
+
+
+
+if __name__ == "__main__":
+    typer.run(train)
