@@ -36,7 +36,7 @@ def masked_mean(
 
 
 def get_response_log_probs(
-    model: PreTrainedModel,
+    model: torch.nn.Module,
     input_ids: Int[torch.Tensor, "batch seq_len"],
     labels: Int[torch.Tensor, "batch seq_len"],
     return_token_entropy: bool = False,

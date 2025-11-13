@@ -252,8 +252,8 @@ def main(
                     f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
                 )
                 evaluate_model_on_dataset(llm, val_loader, train_device, 0.05 if not is_test else 0.0)
-                print_and_log(f"--- End of Evaluation ---")
                 # Save checkpoint after evaluation
+                save_start_time = time.time()
                 tmp_checkpoint_dir = f"{checkpoint_dir}_temp"
                 if not os.path.exists(tmp_checkpoint_dir):
                     os.makedirs(tmp_checkpoint_dir, exist_ok=True)
@@ -270,7 +270,8 @@ def main(
                 if os.path.exists(checkpoint_dir):
                     shutil.rmtree(checkpoint_dir)
                 os.rename(tmp_checkpoint_dir, checkpoint_dir)
-                print_and_log(f"Model checkpoint saved to {checkpoint_dir} after evaluation.")
+                save_end_time = time.time()
+                print_and_log(f"Model checkpoint saved to {checkpoint_dir} after evaluation. Time taken: {save_end_time - save_start_time:.2f} seconds.")
             last_train_iter += 1
 
     print_and_log("Final evaluation after training completion:")
