@@ -158,10 +158,10 @@ def main(
         val_dataset, batch_size=4, shuffle=False, drop_last=True, pin_memory=False
     )
 
-    if config.use_compile:
-        torch.set_float32_matmul_precision("high")
-        llm = torch.compile(llm)  # type: ignore
-        print_and_log("Model compiled with torch.compile")
+    # if config.use_compile:
+    #     torch.set_float32_matmul_precision("high")
+    #     llm = torch.compile(llm)  # type: ignore
+    #     print_and_log("Model compiled with torch.compile")
 
     assert (
         batch_size % gradient_accumulation_steps == 0
@@ -173,7 +173,7 @@ def main(
         f"Vocabulary size: {vocab_size:,}, Training steps: {train_steps:,}, Micro-batch size: {micro_batch_size}"
     )
     
-    optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01)
+    optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01, fused=True)
     from transformers import get_cosine_schedule_with_warmup  # type: ignore
 
     lr_scheduler = get_cosine_schedule_with_warmup(
