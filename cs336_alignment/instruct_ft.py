@@ -247,7 +247,7 @@ def main(
                     f"Epoch {epoch+1} Iter {itr+1}/{train_steps_this_epoch}, Loss: {moving_avg_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}"
                 )
 
-            if (itr + 1) % eval_interval == 0 or itr == 10:
+            if (itr + 1) % eval_interval == 0 or (itr == 10 and not resume):
                 print_and_log(
                     f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
                 )
