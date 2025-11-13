@@ -164,7 +164,7 @@ def eval_dpo_loss(
 ) -> float:
     with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         total_loss = 0.0
-        for example in tqdm(dataset, total=len(dataset), desc="Evaluating"):
+        for example in tqdm(dataset, total=len(dataset), desc="Evaluating", leave=False):
             prompt = example["prompt"]  # type: ignore
             response_chosen = example["good"]  # type: ignore
             response_rejected = example["bad"]  # type: ignore
@@ -277,7 +277,7 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
             grad_norm = torch.nn.utils.clip_grad_norm_(llm.parameters(), max_norm=1.0)
             optimizer.step()
             optimizer.zero_grad()
-            print_and_log(f"Iter={itr}/{training_steps} loss={moving_avg_loss.item():.4f} grad_norm={grad_norm:.4f}")
+            print_and_log(f"Iter={itr + 1}/{training_steps} loss={moving_avg_loss.item():.4f} grad_norm={grad_norm:.4f}")
         
         if (itr + 1) % eval_interval == 0 or itr + 1 == gradient_accumulation_steps:
             # Evaluation code can be added here
