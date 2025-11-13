@@ -192,7 +192,7 @@ def eval_dpo_loss(
         torch.inference_mode(True),
         torch.autocast(device_type="cuda", dtype=torch.bfloat16),
     ):
-        total_loss = 0.0
+        total_loss = torch.tensor(0.0, device=policy_model.device)
         for example in tqdm(
             dataset, total=len(dataset), desc="Evaluating", leave=False
         ):
@@ -209,8 +209,8 @@ def eval_dpo_loss(
                 response_chosen,
                 response_rejected,
             )
-            total_loss += loss.item()
-    avg_loss = total_loss / len(dataset)
+            total_loss += loss
+    avg_loss = total_loss.item() / len(dataset)
     return avg_loss
 
 
@@ -283,8 +283,7 @@ def train(
     training_steps = len(train_ds)
     eval_interval = training_steps // 50 if not is_test else 64
     save_interval = min(gradient_accumulation_steps * 100, training_steps)
-    print_loss_interval = 128 if not is_test else 8
-    print_and_log(f"Training steps: {training_steps}, Eval interval: {eval_interval} loss interval: {print_loss_interval} save interval: {save_interval}")
+    print_and_log(f"Training steps: {training_steps}, Eval interval: {eval_interval} save interval: {save_interval}")
 
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
@@ -301,6 +300,7 @@ def train(
     else:
         last_iter = 0
     remain_steps = training_steps - last_iter
+    total_loss = torch.tensor(0.0, device=train_device)
     for itr, example in tqdm(
         enumerate(train_ds), total=remain_steps, desc="Training"
     ):
@@ -311,7 +311,6 @@ def train(
         response_chosen = example["good"]  # type: ignore
         response_rejected = example["bad"]  # type: ignore
 
-        total_loss = torch.tensor(0.0, device=train_device)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             loss = (
                 dpo_loss(
@@ -327,13 +326,14 @@ def train(
             )
             total_loss += loss.detach()
             loss.backward()
-
-        if itr == 0:
-            moving_avg_loss = total_loss
-        else:
-            moving_avg_loss = 0.9 * moving_avg_loss + 0.1 * total_loss
-
-        if (itr + 1) % print_loss_interval == 0:
+            
+        if (itr + 1) % gradient_accumulation_steps == 0:
+            with torch.no_grad():
+                if (itr + 1) == gradient_accumulation_steps:
+                    moving_avg_loss = total_loss
+                else:
+                    moving_avg_loss = 0.9 * moving_avg_loss + 0.1 * total_loss
+            total_loss = torch.tensor(0.0, device=train_device)
             grad_norm = torch.nn.utils.clip_grad_norm_(llm.parameters(), max_norm=1.0)
             optimizer.step()
             optimizer.zero_grad()
@@ -367,7 +367,7 @@ def train(
         beta=0.1,
         dataset=test_ds,
     )
-    print_and_log(f"Final eval loss: {final_eval_loss:,}")
+    print_and_log(f"Final eval loss: {final_eval_loss:.4f}")
     end_time = time.time()
     elapsed_time = end_time - start_time
     elapsed_time_hours = elapsed_time / 3600
