@@ -130,8 +130,6 @@ def main(
     )
     llm.config.use_cache = False  # disable cache for training
     
-    print_gpu_memory("After model loading")
-
     seq_len = config.seq_len
     dataset = SFTDataset(
         tokenizer,
@@ -175,8 +173,6 @@ def main(
         f"Vocabulary size: {vocab_size:,}, Training steps: {train_steps:,}, Micro-batch size: {micro_batch_size}"
     )
     
-    print_gpu_memory("Before optimizer creation")
-
     optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01)
     from transformers import get_cosine_schedule_with_warmup  # type: ignore
 
