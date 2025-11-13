@@ -129,6 +129,8 @@ def main(
         device_map={"": train_device},
     )
     llm.config.use_cache = False  # disable cache for training
+    print_and_log(f"is_gradient_checkpointing: {llm.is_gradient_checkpointing}")
+    llm.gradient_checkpointing_enable()
     
     print_gpu_memory("After model loading")
 
