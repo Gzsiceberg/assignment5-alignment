@@ -99,8 +99,9 @@ def main(
     model_id = config.model_id
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     train_device = "cuda:0"
+    checkpoint_dir = f"{model_id}-fine-tuned"
     llm: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(
-        model_id if not resume else f"{model_id}-fine-tuned",
+        model_id if not resume else checkpoint_dir,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
@@ -157,13 +158,12 @@ def main(
         num_training_steps=train_steps,
     )
 
-    output_dir = f"{model_id}-fine-tuned"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir, exist_ok=True)
-        llm.save_pretrained(output_dir)  # type: ignore
-        tokenizer.save_pretrained(output_dir)
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        llm.save_pretrained(checkpoint_dir)  # type: ignore
+        tokenizer.save_pretrained(checkpoint_dir)
 
-    checkpoint_path = f"{model_id}-fine-tuned/checkpoint.pth"
+    checkpoint_path = f"{checkpoint_dir}/checkpoint.pth"
     if resume:
         last_train_iter = load_checkpoint(optimizer, lr_scheduler, checkpoint_path)
         lr = lr_scheduler.get_last_lr()[0]
@@ -246,6 +246,7 @@ def main(
                     f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
                 )
                 evaluate_model_on_dataset(llm, val_loader, train_device, 0.05)
+                llm.save_pretrained(checkpoint_dir)  # type: ignore
                 save_checkpoint(
                     optimizer,
                     lr_scheduler,
@@ -259,8 +260,8 @@ def main(
 
     if not is_test:
         # Save the fine-tuned model
-        llm.save_pretrained(output_dir)  # type: ignore
-        print_and_log(f"Fine-tuned model saved to {output_dir}")
+        llm.save_pretrained(checkpoint_dir)  # type: ignore
+        print_and_log(f"Fine-tuned model saved to {checkpoint_dir}")
     end_time = time.time()
     elapsed_time = end_time - start_time
     print_and_log(f"Training completed in {elapsed_time/60:.2f} minutes.")
