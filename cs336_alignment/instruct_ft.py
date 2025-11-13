@@ -213,7 +213,6 @@ def main(
 
             total_loss = do_grad_accumulate(
                 gradient_accumulation_steps,
-                train_device,
                 llm,
                 seq_len,
                 micro_batch_size,
@@ -310,20 +309,20 @@ def safe_save_checkpoint(
 
 def do_grad_accumulate(
     gradient_accumulation_steps: int,
-    train_device: str,
     llm: PreTrainedModel,
     seq_len: int,
     micro_batch_size: int,
     input_ids: torch.Tensor,
     labels: torch.Tensor,
 ) -> torch.Tensor:
-    total_loss = torch.tensor(0.0, device=train_device)
+    device = llm.device
+    total_loss = torch.tensor(0.0, device=device, dtype=torch.float32)
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         for s in trange(gradient_accumulation_steps, desc="Micro-batches", leave=False):
             start_idx = s * micro_batch_size
             end_idx = (s + 1) * micro_batch_size
-            input_ids_mb = input_ids[start_idx:end_idx].to(train_device)
-            labels_mb = labels[start_idx:end_idx].to(train_device)
+            input_ids_mb = input_ids[start_idx:end_idx].to(device)
+            labels_mb = labels[start_idx:end_idx].to(device)
             logits: torch.Tensor = llm(input_ids_mb).logits  # type: ignore
             vocab_size = logits.size(-1)
             assert logits.shape == (
@@ -341,4 +340,7 @@ def do_grad_accumulate(
 
 
 if __name__ == "__main__":
-    typer.run(main)
+    app = typer.Typer()
+    app.command()(main)
+    app_info = typer.main.get_command(app)
+    app_info.main(standalone_mode=True)
