@@ -439,7 +439,6 @@ if __name__ == "__main__":
 
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
 
-    use_lora = True
     if use_lora:
         assert lora_config is not None
         model = apply_lora(llm, lora_config)
