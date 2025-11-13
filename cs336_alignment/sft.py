@@ -246,10 +246,10 @@ def train_sft(
 def apply_lora(model: PreTrainedModel, lora_config: LoraParaConfig) -> torch.nn.Module:
     from peft import LoraConfig, get_peft_model
     peft_config = LoraConfig(
-        r=lora_config.lora_r,
-        lora_alpha=lora_config.lora_alpha,
-        lora_dropout=lora_config.lora_dropout,
-        target_modules=lora_config.lora_target_modules,
+        r=lora_config.r,
+        lora_alpha=lora_config.alpha,
+        lora_dropout=lora_config.dropout,
+        target_modules=lora_config.target_modules,
         bias="none",
         task_type="CAUSAL_LM",
     )
