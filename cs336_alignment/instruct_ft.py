@@ -128,9 +128,10 @@ def main(
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
-    llm.config.use_cache = False  # disable cache for training
-    print_and_log(f"is_gradient_checkpointing: {llm.is_gradient_checkpointing}")
-    llm.gradient_checkpointing_enable()
+    # llm.config.use_cache = False  # disable cache for training
+    # print_and_log(f"is_gradient_checkpointing before: {llm.is_gradient_checkpointing}")
+    # llm.gradient_checkpointing_enable()
+    # print_and_log(f"is_gradient_checkpointing after: {llm.is_gradient_checkpointing}")
     
     print_gpu_memory("After model loading")
 
