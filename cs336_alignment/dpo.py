@@ -76,7 +76,7 @@ def tokenizer_encode_batch(
     input_ids_list = []
     response_mask_list = []
 
-    eos_token_id: int = tokenizer.eos_token_id # type: ignore
+    eos_token_id: int = tokenizer.eos_token_id  # type: ignore
     for prompt, response in zip(prompts, responses):
         # Tokenize prompt and response separately
         content = prompt_template.format(instruction=prompt, response=response)
@@ -103,6 +103,29 @@ def tokenizer_encode_batch(
     return input_ids_batch, response_mask_batch
 
 
+def dpo_loss_batch(
+    policy_model: torch.nn.Module,
+    ref_model: torch.nn.Module,
+    input_ids_batch: torch.Tensor,
+    response_mask_batch: torch.Tensor,
+    beta: float,
+) -> torch.Tensor:
+    # Compute log prob deltas (one forward pass per model)
+    logp_policy_delta = compute_logp_delta(
+        policy_model, input_ids_batch, response_mask_batch
+    )
+
+    with torch.inference_mode():
+        logp_ref_delta = compute_logp_delta(
+            ref_model, input_ids_batch, response_mask_batch
+        )
+        logp_ref_delta = logp_ref_delta.to(logp_policy_delta.device)
+
+    # DPO loss: -log sigmoid(beta * (log_pi_chosen/rejected - log_ref_chosen/rejected))
+    loss = -F.logsigmoid(beta * (logp_policy_delta - logp_ref_delta))
+    return loss.mean()  # Average over batch (should be single value for one example)
+
+
 def dpo_loss(
     policy_model: torch.nn.Module,
     ref_model: torch.nn.Module,
@@ -120,21 +143,13 @@ def dpo_loss(
     input_ids_batch, response_mask_batch = tokenizer_encode_batch(
         tokenizer, [prompt, prompt], [response_chosen, response_rejected]
     )
-
-    # Compute log prob deltas (one forward pass per model)
-    logp_policy_delta = compute_logp_delta(
-        policy_model, input_ids_batch, response_mask_batch
+    return dpo_loss_batch(
+        policy_model,
+        ref_model,
+        input_ids_batch,
+        response_mask_batch,
+        beta,
     )
-
-    with torch.inference_mode():
-        logp_ref_delta = compute_logp_delta(
-            ref_model, input_ids_batch, response_mask_batch
-        )
-        logp_ref_delta = logp_ref_delta.to(logp_policy_delta.device)
-
-    # DPO loss: -log sigmoid(beta * (log_pi_chosen/rejected - log_ref_chosen/rejected))
-    loss = -F.logsigmoid(beta * (logp_policy_delta - logp_ref_delta))
-    return loss.mean()  # Average over batch (should be single value for one example)
 
 
 if __name__ == "__main__":
