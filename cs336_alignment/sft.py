@@ -126,10 +126,10 @@ def do_grad_accumulate(
             loss, meta_info = micro_batch_train_step_fn(extra_data, log_probs, batch_resp_mask, gradient_accumulation_steps)
             for k, v in meta_info.items():
                 if k not in total_meta_info:
-                    total_meta_info[k] = v.detach() / gradient_accumulation_steps
+                    total_meta_info[k] = v.detach() 
                 else:
-                    total_meta_info[k] += v.detach() / gradient_accumulation_steps
-            total_loss += loss.detach() / gradient_accumulation_steps
+                    total_meta_info[k] += v.detach()
+            total_loss += loss.detach()
     return total_loss, total_entropy, total_meta_info
 
 

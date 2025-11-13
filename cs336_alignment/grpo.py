@@ -238,6 +238,8 @@ def grpo_microbatch_train_step(
     assert masked_loss.shape == (batch_size,), "Masked loss shape mismatch"
     mean_loss = masked_loss.mean() / gradient_accumulation_steps
     mean_loss.backward()
+    for k, v in meta_info.items():
+        meta_info[k] = v / gradient_accumulation_steps
     return mean_loss, meta_info
 
 
@@ -329,7 +331,7 @@ def train_pg(
             policy_log_probs,
             response_mask,
             gradient_accumulation_steps,
-            rl_config.loss_type,
+            rl_config.loss_type, # type: ignore
             raw_rewards_batch,
             advantages_batch,
             old_log_probs_batch,
