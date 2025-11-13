@@ -1,4 +1,5 @@
 import shutil
+import time
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 import os
 import torch
@@ -19,7 +20,7 @@ def evaluate_model_on_dataset(
     device: str,
     prob_filter: float = 0.0,
 ):
-    llm.eval() # type: ignore
+    llm.eval()  # type: ignore
     total_loss = torch.tensor(0.0, device=device)
     total_count: int = 0
     with torch.inference_mode(True):
@@ -40,7 +41,7 @@ def evaluate_model_on_dataset(
     avg_loss = total_loss.item() / total_count
     perplexity = np.exp(avg_loss)
     print_and_log(f"Evaluation Loss: {avg_loss:.4f}, Perplexity: {perplexity:.4f}")
-    llm.train() # type: ignore
+    llm.train()  # type: ignore
 
 
 def save_checkpoint(
@@ -80,7 +81,7 @@ def main(
         0, "-l", help="Limit the number of training samples (0 for no limit)"
     ),
     resume: bool = typer.Option(False, "-r", help="Resume training from checkpoint"),
-    shutdown: bool = typer.Option(False, "-d", help="Shutdown after training")
+    shutdown: bool = typer.Option(False, "-d", help="Shutdown after training"),
 ):
 
     config = load_config_from_file(config_path)
@@ -170,7 +171,9 @@ def main(
     if resume:
         last_train_iter = load_checkpoint(optimizer, lr_scheduler, checkpoint_path)
         lr = lr_scheduler.get_last_lr()[0]
-        print_and_log(f"Resuming training from checkpoint. lr={lr:.6f}, last_iter={last_train_iter}")
+        print_and_log(
+            f"Resuming training from checkpoint. lr={lr:.6f}, last_iter={last_train_iter}"
+        )
     else:
         last_train_iter = 0
 
@@ -184,13 +187,16 @@ def main(
     print_and_log(
         f"Evaluation interval set to every {eval_interval} training iterations."
     )
-    
-    import time
+
     start_time = time.time()
     moving_avg_loss = torch.tensor(0.0, device=train_device)
     for epoch in tqdm(range(max_epochs)):
         iter_per_epoch = len(loader)
-        for itr, batch in (tpar := tqdm(enumerate(loader), total=iter_per_epoch, desc=f"Epoch {epoch+1}")):
+        for itr, batch in (
+            tpar := tqdm(
+                enumerate(loader), total=iter_per_epoch, desc=f"Epoch {epoch+1}"
+            )
+        ):
             if itr < last_train_iter:
                 continue
             input_ids: torch.Tensor = batch["input_ids"].to(train_device)
@@ -204,12 +210,22 @@ def main(
                 seq_len,
             ), f"labels shape: {labels.shape}"
 
-            total_loss = do_grad_accumulate(gradient_accumulation_steps, train_device, llm, seq_len, micro_batch_size, input_ids, labels)
+            total_loss = do_grad_accumulate(
+                gradient_accumulation_steps,
+                train_device,
+                llm,
+                seq_len,
+                micro_batch_size,
+                input_ids,
+                labels,
+            )
 
             if itr == 0 and epoch == 0:
                 moving_avg_loss = total_loss.detach()
             else:
-                moving_avg_loss = 0.9 * moving_avg_loss.detach() + 0.1 * total_loss.detach()
+                moving_avg_loss = (
+                    0.9 * moving_avg_loss.detach() + 0.1 * total_loss.detach()
+                )
             grad_norm = torch.nn.utils.clip_grad_norm_(llm.parameters(), max_norm=1.0)  # type: ignore
 
             current_lr = lr_scheduler.get_last_lr()[0]
@@ -228,34 +244,25 @@ def main(
                 print_and_log(
                     f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
                 )
-                evaluate_model_on_dataset(llm, val_loader, train_device, 0.05 if not is_test else 0.0)
-                # Save checkpoint after evaluation
-                save_start_time = time.time()
-                tmp_checkpoint_dir = f"{checkpoint_dir}_temp"
-                if not os.path.exists(tmp_checkpoint_dir):
-                    os.makedirs(tmp_checkpoint_dir, exist_ok=True)
-                tmp_checkpoint_path = f"{tmp_checkpoint_dir}/checkpoint.pth"
-
-                llm.save_pretrained(tmp_checkpoint_dir)  # type: ignore
-                save_checkpoint(
-                    optimizer,
-                    lr_scheduler,
-                    last_iter=last_train_iter,
-                    checkpoint_path=tmp_checkpoint_path,
+                evaluate_model_on_dataset(
+                    llm, val_loader, train_device, 0.05 if not is_test else 0.0
                 )
-                # rename temp directory to main checkpoint directory
-                if os.path.exists(checkpoint_dir):
-                    shutil.rmtree(checkpoint_dir)
-                os.rename(tmp_checkpoint_dir, checkpoint_dir)
-                save_end_time = time.time()
-                print_and_log(f"Model checkpoint saved to {checkpoint_dir} after evaluation. Time taken: {save_end_time - save_start_time:.2f} seconds.")
+                # Save checkpoint after evaluation
+                safe_save_checkpoint(
+                    checkpoint_dir, llm, optimizer, lr_scheduler, last_train_iter
+                )
 
     print_and_log("Final evaluation after training completion:")
     evaluate_model_on_dataset(llm, val_loader, train_device)
 
     if not is_test:
         # Save the fine-tuned model
-        save_checkpoint(optimizer, lr_scheduler, last_iter=last_train_iter, checkpoint_path=checkpoint_path,)
+        save_checkpoint(
+            optimizer,
+            lr_scheduler,
+            last_iter=last_train_iter,
+            checkpoint_path=checkpoint_path,
+        )
         llm.save_pretrained(checkpoint_dir)  # type: ignore
         tokenizer.save_pretrained(checkpoint_dir)
         print_and_log(f"Fine-tuned model saved to {checkpoint_dir}")
@@ -267,13 +274,49 @@ def main(
         print_and_log("Shutting down the system as requested.")
         os.system("runpodctl stop pod $RUNPOD_POD_ID")
 
-def do_grad_accumulate(gradient_accumulation_steps: int, train_device: str, llm: PreTrainedModel, seq_len: int, 
-                       micro_batch_size: int, input_ids: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+
+def safe_save_checkpoint(
+    checkpoint_dir: str,
+    llm: PreTrainedModel,
+    optimizer: torch.optim.Optimizer,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
+    last_train_iter: int,
+):
+    save_start_time = time.time()
+    tmp_checkpoint_dir = f"{checkpoint_dir}_temp"
+    if not os.path.exists(tmp_checkpoint_dir):
+        os.makedirs(tmp_checkpoint_dir, exist_ok=True)
+    tmp_checkpoint_path = f"{tmp_checkpoint_dir}/checkpoint.pth"
+
+    llm.save_pretrained(tmp_checkpoint_dir)  # type: ignore
+    save_checkpoint(
+        optimizer,
+        lr_scheduler,
+        last_iter=last_train_iter,
+        checkpoint_path=tmp_checkpoint_path,
+    )
+    # rename temp directory to main checkpoint directory
+    if os.path.exists(checkpoint_dir):
+        shutil.rmtree(checkpoint_dir)
+    os.rename(tmp_checkpoint_dir, checkpoint_dir)
+    save_end_time = time.time()
+    print_and_log(
+        f"Model checkpoint saved to {checkpoint_dir} after evaluation. Time taken: {save_end_time - save_start_time:.2f} seconds."
+    )
+
+
+def do_grad_accumulate(
+    gradient_accumulation_steps: int,
+    train_device: str,
+    llm: PreTrainedModel,
+    seq_len: int,
+    micro_batch_size: int,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+) -> torch.Tensor:
     total_loss = torch.tensor(0.0, device=train_device)
     with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
-        for s in trange(
-                    gradient_accumulation_steps, desc="Micro-batches", leave=False
-                ):
+        for s in trange(gradient_accumulation_steps, desc="Micro-batches", leave=False):
             start_idx = s * micro_batch_size
             end_idx = (s + 1) * micro_batch_size
             input_ids_mb = input_ids[start_idx:end_idx]
@@ -281,17 +324,18 @@ def do_grad_accumulate(gradient_accumulation_steps: int, train_device: str, llm:
             logits = llm(input_ids_mb).logits  # type: ignore
             vocab_size = logits.size(-1)
             assert logits.shape == (
-                        micro_batch_size,
-                        seq_len,
-                        vocab_size,
-                    ), f"logits shape: {logits.shape}"
+                micro_batch_size,
+                seq_len,
+                vocab_size,
+            ), f"logits shape: {logits.shape}"
             loss = (
-                        F.cross_entropy(logits.view(-1, vocab_size), labels_mb.view(-1))
-                        / gradient_accumulation_steps
-                    )
+                F.cross_entropy(logits.view(-1, vocab_size), labels_mb.view(-1))
+                / gradient_accumulation_steps
+            )
             loss.backward()
             total_loss += loss.detach()
     return total_loss
+
 
 if __name__ == "__main__":
     typer.run(main)
