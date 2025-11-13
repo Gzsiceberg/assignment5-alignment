@@ -228,7 +228,10 @@ def main(
                     loss.backward()
                     total_loss += loss.detach()
 
-            moving_avg_loss = 0.9 * moving_avg_loss.detach() + 0.1 * total_loss.detach()
+            if itr == 0 and epoch == 0:
+                moving_avg_loss = total_loss.detach()
+            else:
+                moving_avg_loss = 0.9 * moving_avg_loss.detach() + 0.1 * total_loss.detach()
             grad_norm = torch.nn.utils.clip_grad_norm_(llm.parameters(), max_norm=1.0)  # type: ignore
 
             current_lr = lr_scheduler.get_last_lr()[0]
