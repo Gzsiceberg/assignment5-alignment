@@ -264,6 +264,7 @@ def train(
     )
 
     if use_compile:
+        torch.set_float32_matmul_precision("high")
         llm = torch.compile(llm)  # type: ignore
         llm_ref = torch.compile(llm_ref)  # type: ignore
 
