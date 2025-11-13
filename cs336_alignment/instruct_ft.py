@@ -88,6 +88,8 @@ def main(
     config_name = os.path.splitext(os.path.basename(config_path))[0]
     setup_logging(f"instruct_ft_{config_name}.log")
     print_and_log(f"{config}")
+    if shutdown:
+        print_and_log("Shutdown after training is enabled.")
     batch_size = config.batch_size
     max_epochs = config.epochs
     gradient_accumulation_steps = config.gradient_accumulation_steps
