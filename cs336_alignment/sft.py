@@ -216,9 +216,8 @@ def train_sft(
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=sft_config.clip_gradients
             )
-            print_and_log(
-                f"GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
-            )
+        else:
+            grad_norm = torch.tensor(0.0, device=train_device)
 
         current_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler else sft_config.learning_rate
         optimizer.step()
@@ -227,7 +226,7 @@ def train_sft(
         optimizer.zero_grad()
 
         print_and_log(
-            f"Step {st+1}/{training_steps} - Loss: {total_loss.item():.4f} - LR: {current_lr:.6f} - Entropy: {total_entropy.item():.4f}"
+            f"Step {st+1}/{training_steps} Loss={total_loss.item():.4f} LR={current_lr:.6f} Entropy: {total_entropy.item():.4f} GradNorm={grad_norm:.4f}"
         )
         pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}")  # type: ignore
 
@@ -244,9 +243,8 @@ def train_sft(
     )
 
 
-def apply_lora(model: PreTrainedModel) -> torch.nn.Module:
+def apply_lora(model: PreTrainedModel, lora_config: LoraParaConfig) -> torch.nn.Module:
     from peft import LoraConfig, get_peft_model
-    lora_config = LoraParaConfig()
     peft_config = LoraConfig(
         r=lora_config.lora_r,
         lora_alpha=lora_config.lora_alpha,
@@ -362,6 +360,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config = load_config_from_file(args.config)
     config_name = os.path.splitext(os.path.basename(args.config))[0]
+    use_lora = False
+    if "LoraParaConfig" in config:
+        use_lora = True
+        lora_config = LoraParaConfig(**config["LoraParaConfig"])
+    else:
+        lora_config = None
     setup_logging(log_file_name=f"{config_name}.log")
     print_and_log("Starting SFT training...")
     print_and_log(f"Arguments: {args}")
@@ -436,7 +440,8 @@ if __name__ == "__main__":
 
     use_lora = True
     if use_lora:
-        model = apply_lora(llm)
+        assert lora_config is not None
+        model = apply_lora(llm, lora_config)
     else:
         model = llm
 
@@ -447,7 +452,7 @@ if __name__ == "__main__":
     train_sft(
         sft_config,
         train_device,
-        model,
+        model, # type: ignore
         input_ids,
         labels,
         resp_mask,
