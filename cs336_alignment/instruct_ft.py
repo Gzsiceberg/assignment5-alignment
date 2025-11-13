@@ -133,10 +133,10 @@ def main(
     print_and_log(
         f"Total training samples: {total_samples} Total validation samples: {len(val_dataset)}"
     )
-    loader = torch.utils.data.DataLoader(
+    loader: torch.utils.data.DataLoader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=True, drop_last=True
     )
-    val_loader = torch.utils.data.DataLoader(
+    val_loader: torch.utils.data.DataLoader = torch.utils.data.DataLoader(
         val_dataset, batch_size=4, shuffle=False, drop_last=True
     )
 
