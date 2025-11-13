@@ -14,6 +14,14 @@ from cs336_alignment.data_loading import SFTDataset
 import torch.nn.functional as F
 
 
+def print_gpu_memory(prefix=""):
+    """Print current GPU memory usage for debugging"""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print_and_log(f"{prefix} GPU Memory: Allocated={allocated:.2f}GB, Reserved={reserved:.2f}GB")
+
+
 def evaluate_model_on_dataset(
     llm: PreTrainedModel,
     loader: torch.utils.data.DataLoader,
@@ -122,9 +130,7 @@ def main(
     )
     llm.config.use_cache = False  # disable cache for training
     
-    # Enable gradient checkpointing to save memory
-    llm.gradient_checkpointing_enable()
-    print_and_log("Gradient checkpointing enabled to reduce memory usage")
+    print_gpu_memory("After model loading")
 
     seq_len = config.seq_len
     dataset = SFTDataset(
@@ -157,6 +163,12 @@ def main(
     if config.use_compile:
         torch.set_float32_matmul_precision("high")
         llm = torch.compile(llm)  # type: ignore
+        print_and_log("Model compiled with torch.compile")
+    else:
+        # Enable gradient checkpointing ONLY if not using compile
+        # In transformers 4.57+, gradient_checkpointing conflicts with torch.compile
+        llm.gradient_checkpointing_enable()
+        print_and_log("Gradient checkpointing enabled (compile disabled)")
 
     assert (
         batch_size % gradient_accumulation_steps == 0
@@ -167,6 +179,8 @@ def main(
     print_and_log(
         f"Vocabulary size: {vocab_size:,}, Training steps: {train_steps:,}, Micro-batch size: {micro_batch_size}"
     )
+    
+    print_gpu_memory("Before optimizer creation")
 
     optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01, fused=True)
     from transformers import get_cosine_schedule_with_warmup  # type: ignore
@@ -246,7 +260,7 @@ def main(
             current_lr = lr_scheduler.get_last_lr()[0]
             optimizer.step()
             lr_scheduler.step()
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             
             # Clear unused tensors and cache periodically
             if itr % 50 == 0:
@@ -335,12 +349,14 @@ def do_grad_accumulate(
 ) -> torch.Tensor:
     device = llm.device
     total_loss = torch.tensor(0.0, device=device, dtype=torch.float32)
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-        for s in trange(gradient_accumulation_steps, desc="Micro-batches", leave=False):
-            start_idx = s * micro_batch_size
-            end_idx = (s + 1) * micro_batch_size
-            input_ids_mb = input_ids[start_idx:end_idx].to(device)
-            labels_mb = labels[start_idx:end_idx].to(device)
+    
+    for s in trange(gradient_accumulation_steps, desc="Micro-batches", leave=False):
+        start_idx = s * micro_batch_size
+        end_idx = (s + 1) * micro_batch_size
+        input_ids_mb = input_ids[start_idx:end_idx].to(device)
+        labels_mb = labels[start_idx:end_idx].to(device)
+        
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             logits: torch.Tensor = llm(input_ids_mb).logits  # type: ignore
             vocab_size = logits.size(-1)
             assert logits.shape == (
@@ -354,9 +370,10 @@ def do_grad_accumulate(
             )
             loss.backward()
             total_loss += loss.detach()
-            
-            # Clear tensors after each micro-batch
-            del input_ids_mb, labels_mb, logits, loss
+        
+        # Clear tensors after each micro-batch
+        del input_ids_mb, labels_mb, logits, loss
+    
     return total_loss
 
 
