@@ -1,4 +1,6 @@
 import os
+import time
+import shutil
 import torch
 from transformers import PreTrainedTokenizerBase, AutoModelForCausalLM, AutoTokenizer
 from cs336_alignment.config import DPOConfig, load_config_from_file
@@ -155,6 +157,30 @@ def dpo_loss(
     )
 
 
+def save_checkpoint(
+    optimizer: torch.optim.Optimizer,
+    last_iter: int,
+    checkpoint_path: str,
+):
+    print_and_log(f"Saving checkpoint to {checkpoint_path} at iteration {last_iter}")
+    checkpoint = {
+        "optimizer_state_dict": optimizer.state_dict(),
+        "last_iter": last_iter,
+    }
+    torch.save(checkpoint, checkpoint_path)
+    print_and_log(f"Checkpoint saved to {checkpoint_path}")
+
+
+def load_checkpoint(
+    optimizer: torch.optim.Optimizer,
+    checkpoint_path: str,
+) -> int:
+    checkpoint = torch.load(checkpoint_path, weights_only=True)
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    print_and_log(f"Checkpoint loaded from {checkpoint_path}")
+    return checkpoint["last_iter"]
+
+
 def eval_dpo_loss(
     policy_model: torch.nn.Module,
     ref_model: torch.nn.Module,
@@ -162,9 +188,14 @@ def eval_dpo_loss(
     beta: float,
     dataset: datasets.Dataset,
 ) -> float:
-    with torch.inference_mode(True), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    with (
+        torch.inference_mode(True),
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16),
+    ):
         total_loss = 0.0
-        for example in tqdm(dataset, total=len(dataset), desc="Evaluating", leave=False):
+        for example in tqdm(
+            dataset, total=len(dataset), desc="Evaluating", leave=False
+        ):
             prompt = example["prompt"]  # type: ignore
             response_chosen = example["good"]  # type: ignore
             response_rejected = example["bad"]  # type: ignore
@@ -183,9 +214,17 @@ def eval_dpo_loss(
     return avg_loss
 
 
-def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path to config file"),
-          limit: int = typer.Option(-1, "-l", help="Limit number of training examples (-1 for no limit)")):
-    
+def train(
+    config_path: str = typer.Argument(
+        "config/dpo_test.yaml", help="Path to config file"
+    ),
+    limit: int = typer.Option(
+        -1, "-l", help="Limit number of training examples (-1 for no limit)"
+    ),
+    resume: bool = typer.Option(False, "-r", help="Resume training from checkpoint"),
+    shutdown: bool = typer.Option(False, "-d", help="Shutdown after training")
+):
+
     seed = 52
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -196,6 +235,8 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
     config_name = os.path.splitext(os.path.basename(config_path))[0]
     setup_logging(f"dpo_{config_name}.log")
     print_and_log(f"{dpo_config}")
+    if shutdown:
+        print_and_log("Shutdown after training is enabled.")
 
     is_test = "_test.yaml" in config_name.lower()
 
@@ -203,13 +244,13 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
     model_id = dpo_config.model_id
     use_compile = dpo_config.use_compile
 
-    output_model_id = f"{dpo_config.model_id}-dpo-finetuned"
+    checkpoint_dir = f"{dpo_config.model_id}-dpo-finetuned"
     train_device = "cuda:0"
     ref_device = "cuda:1" if gpu_count > 1 else "cuda:0"
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
     llm: torch.nn.Module = AutoModelForCausalLM.from_pretrained(
-        model_id,
+        model_id if not resume else checkpoint_dir,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
@@ -223,10 +264,11 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
     )
 
     if use_compile:
-        llm = torch.compile(llm) # type: ignore
-        llm_ref = torch.compile(llm_ref) # type: ignore
+        llm = torch.compile(llm)  # type: ignore
+        llm_ref = torch.compile(llm_ref)  # type: ignore
 
     from cs336_alignment.dpo_data import get_full_dataset
+
     train_ds, test_ds = get_full_dataset()
     if limit > 0:
         train_ds = train_ds.select(range(limit))
@@ -235,50 +277,69 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
     test_ds = test_ds.shuffle()
     test_ds = test_ds.select(range(256))
 
-    optimizer = torch.optim.RMSprop(llm.parameters(), lr=dpo_config.lr) # type: ignore
+    optimizer = torch.optim.RMSprop(llm.parameters(), lr=dpo_config.lr)  # type: ignore
     gradient_accumulation_steps = dpo_config.gradient_accumulation_steps
     training_steps = len(train_ds)
-    eval_interval = training_steps // 100 if not is_test else 20
+    eval_interval = training_steps // 50 if not is_test else 32
+    save_interval = gradient_accumulation_steps * 100
     print_and_log(f"Training steps: {training_steps}, Eval interval: {eval_interval}")
 
-    if not os.path.exists(output_model_id):
-        os.makedirs(output_model_id)
-        tokenizer.save_pretrained(output_model_id)
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
+        tokenizer.save_pretrained(checkpoint_dir)
 
-    import time
     start_time = time.time()
     print_loss_interval = 128
     moving_avg_loss = torch.tensor(0.0, device=train_device)
-    for itr, example in tqdm(enumerate(train_ds), total=training_steps, desc="Training"):
-        prompt = example["prompt"] # type: ignore
-        response_chosen = example["good"] # type: ignore
-        response_rejected = example["bad"] # type: ignore
+    if resume:
+        last_iter: int = load_checkpoint(
+            optimizer,
+            checkpoint_path=f"{checkpoint_dir}/checkpoint.pth",
+        )
+        print_and_log(f"Resuming training from iteration {last_iter}")
+    else:
+        last_iter = 0
+    remain_steps = training_steps - last_iter
+    for itr, example in tqdm(
+        enumerate(train_ds), total=remain_steps, desc="Training"
+    ):
+        if itr >= remain_steps:
+            break
+
+        prompt = example["prompt"]  # type: ignore
+        response_chosen = example["good"]  # type: ignore
+        response_rejected = example["bad"]  # type: ignore
 
         total_loss = torch.tensor(0.0, device=train_device)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            loss = dpo_loss(
-                llm,
-                llm_ref,
-                tokenizer,
-                beta=0.1,
-                prompt=prompt,
-                response_chosen=response_chosen,
-                response_rejected=response_rejected,
-            ) / gradient_accumulation_steps
+            loss = (
+                dpo_loss(
+                    llm,
+                    llm_ref,
+                    tokenizer,
+                    beta=0.1,
+                    prompt=prompt,
+                    response_chosen=response_chosen,
+                    response_rejected=response_rejected,
+                )
+                / gradient_accumulation_steps
+            )
             total_loss += loss.detach()
             loss.backward()
-        
+
         if itr == 0:
             moving_avg_loss = total_loss
         else:
             moving_avg_loss = 0.9 * moving_avg_loss + 0.1 * total_loss
-        
+
         if (itr + 1) % print_loss_interval == 0:
             grad_norm = torch.nn.utils.clip_grad_norm_(llm.parameters(), max_norm=1.0)
             optimizer.step()
             optimizer.zero_grad()
-            print_and_log(f"Iter={itr + 1}/{training_steps} loss={moving_avg_loss.item():.4f} grad_norm={grad_norm:.4f}")
-        
+            print_and_log(
+                f"Iter={itr + 1}/{training_steps} loss={moving_avg_loss.item():.4f} grad_norm={grad_norm:.4f}"
+            )
+
         if (itr + 1) % eval_interval == 0 or itr + 1 == gradient_accumulation_steps:
             # Evaluation code can be added here
             eval_loss = eval_dpo_loss(
@@ -289,10 +350,13 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
                 dataset=test_ds,
             )
             print_and_log(f"Eval loss at iter {itr}: {eval_loss:.4f}")
-    
+        
+        if (itr + 1) % save_interval == 0 or itr + 1 == gradient_accumulation_steps:
+            save_checkpoint_safe(checkpoint_dir, llm, optimizer, time, itr)
+
     # Save final model
-    llm.save_pretrained(output_model_id)
-    tokenizer.save_pretrained(output_model_id)
+    llm.save_pretrained(checkpoint_dir)
+    tokenizer.save_pretrained(checkpoint_dir)
 
     final_eval_loss = eval_dpo_loss(
         llm,
@@ -307,6 +371,29 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
     elapsed_time_hours = elapsed_time / 3600
     print_and_log(f"Total training time: {elapsed_time_hours:.2f} hours")
 
+    if shutdown:
+        print_and_log("Shutting down the system as requested.")
+        os.system("runpodctl stop pod $RUNPOD_POD_ID")
+
+def save_checkpoint_safe(checkpoint_dir, llm, optimizer, time, itr):
+    save_start_time = time.time()
+    tmp_checkpoint_dir = f"{checkpoint_dir}_temp"
+    if not os.path.exists(tmp_checkpoint_dir):
+        os.makedirs(tmp_checkpoint_dir, exist_ok=True)
+    tmp_checkpoint_path = f"{tmp_checkpoint_dir}/checkpoint.pth"
+
+    llm.save_pretrained(tmp_checkpoint_dir)  # type: ignore
+    save_checkpoint(
+                optimizer,
+                last_iter=itr,
+                checkpoint_path=tmp_checkpoint_path,
+            )
+            # rename temp directory to main checkpoint directory
+    if os.path.exists(checkpoint_dir):
+        shutil.rmtree(checkpoint_dir)
+    os.rename(tmp_checkpoint_dir, checkpoint_dir)
+    save_end_time = time.time()
+    print_and_log(f"Model checkpoint saved to {checkpoint_dir} after evaluation. Time taken: {save_end_time - save_start_time:.2f} seconds")
 
 
 if __name__ == "__main__":
