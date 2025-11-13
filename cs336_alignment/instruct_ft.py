@@ -19,7 +19,7 @@ def evaluate_model_on_dataset(
     device: str,
     prob_filter: float = 0.0,
 ):
-    llm.eval()
+    llm.eval() # type: ignore
     total_loss = torch.tensor(0.0, device=device)
     total_count: int = 0
     with torch.inference_mode(True):
@@ -40,7 +40,7 @@ def evaluate_model_on_dataset(
     avg_loss = total_loss.item() / total_count
     perplexity = np.exp(avg_loss)
     print_and_log(f"Evaluation Loss: {avg_loss:.4f}, Perplexity: {perplexity:.4f}")
-    llm.train()
+    llm.train() # type: ignore
 
 
 def save_checkpoint(
