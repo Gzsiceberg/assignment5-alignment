@@ -4,5 +4,5 @@ gradient_accumulation_steps: 8
 micro_batch_size: 8
 eval_interval: 1
 LoraParaConfig:
-  r: 8
-  lora_alpha: 16
+  r: 6
+  alpha: 12

@@ -373,6 +373,7 @@ if __name__ == "__main__":
     if args.model_id:
         sft_config.model_id = args.model_id
     print_and_log(f"SFT Config: {sft_config}")
+    print_and_log(f"Lora Config: {lora_config}" if use_lora else "No LoRA configuration provided.")
 
     seed = args.seed
     torch.manual_seed(seed)
