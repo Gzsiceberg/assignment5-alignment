@@ -42,6 +42,34 @@ def evaluate_model_on_dataset(
     llm.train()
 
 
+def save_checkpoint(
+    optimizer: torch.optim.Optimizer,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
+    last_iter: int,
+    checkpoint_path: str,
+):
+    print_and_log(f"Saving checkpoint to {checkpoint_path} at iteration {last_iter}")
+    checkpoint = {
+        "optimizer_state_dict": optimizer.state_dict(),
+        "lr_scheduler_state_dict": lr_scheduler.state_dict(),
+        "last_iter": last_iter,
+    }
+    torch.save(checkpoint, checkpoint_path)
+    print_and_log(f"Checkpoint saved to {checkpoint_path}")
+
+
+def load_checkpoint(
+    optimizer: torch.optim.Optimizer,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
+    checkpoint_path: str,
+) -> int:
+    checkpoint = torch.load(checkpoint_path)
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
+    print_and_log(f"Checkpoint loaded from {checkpoint_path}")
+    return checkpoint["last_iter"]
+
+
 def main(
     config_path: str = typer.Argument(
         "config/instruction/t.yaml", help="Path to configuration file"
@@ -50,6 +78,7 @@ def main(
     limit: int = typer.Option(
         0, "-l", help="Limit the number of training samples (0 for no limit)"
     ),
+    resume: bool = typer.Option(False, "-r", help="Resume training from checkpoint")
 ):
 
     config = load_config_from_file(config_path)
@@ -70,7 +99,7 @@ def main(
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     train_device = "cuda:0"
     llm: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(
-        model_id,
+        model_id if not resume else f"{model_id}-fine-tuned",
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
@@ -144,12 +173,25 @@ def main(
     print_and_log(
         f"Evaluation interval set to every {eval_interval} training iterations."
     )
+    checkpoint_path = f"{model_id}-fine-tuned/checkpoint.pth"
+    if resume:
+        last_train_iter = load_checkpoint(optimizer, lr_scheduler, checkpoint_path)
+        lr = lr_scheduler.get_last_lr()[0]
+        print_and_log(f"Resuming training from checkpoint. lr={lr:.6f}, last_iter={last_train_iter}")
+    else:
+        last_train_iter = 0
+    
     import time
-
     start_time = time.time()
     moving_avg_loss = torch.tensor(0.0, device=train_device)
     for epoch in tqdm(range(max_epochs)):
-        for batch_idx, batch in (tpar := tqdm(enumerate(loader), total=len(loader))):
+        remaining_iters = train_steps - last_train_iter 
+        train_steps_this_epoch = min(remaining_iters, len(loader))
+        print_and_log(f"Starting epoch {epoch+1}/{max_epochs} for {train_steps_this_epoch} iterations.")
+
+        for itr, batch in (tpar := tqdm(enumerate(loader), total=train_steps_this_epoch, desc=f"Epoch {epoch+1}")):
+            if itr >= train_steps_this_epoch:
+                break
             input_ids: torch.Tensor = batch["input_ids"].to(train_device)
             labels: torch.Tensor = batch["labels"].to(train_device)
             assert input_ids.shape == (
@@ -192,17 +234,24 @@ def main(
             lr_scheduler.step()
             optimizer.zero_grad()
 
-            if batch_idx % 10 == 0:
+            if itr % 10 == 0:
                 tpar.set_description(f"Loss: {moving_avg_loss.item():.4f}")
                 print_and_log(
-                    f"Epoch {epoch+1} Iter {batch_idx+1}/{len(loader)}, Loss: {moving_avg_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}"
+                    f"Epoch {epoch+1} Iter {itr+1}/{train_steps_this_epoch}, Loss: {moving_avg_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}"
                 )
 
-            if (batch_idx + 1) % eval_interval == 0:
+            if (itr + 1) % eval_interval == 0:
                 print_and_log(
-                    f"--- Evaluation at Epoch {epoch+1} Iteration {batch_idx+1} ---"
+                    f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
                 )
                 evaluate_model_on_dataset(llm, val_loader, train_device, 0.05)
+                save_checkpoint(
+                    optimizer,
+                    lr_scheduler,
+                    last_iter=itr,
+                    checkpoint_path=checkpoint_path,
+                )
+            last_train_iter += 1
 
     print_and_log("Final evaluation after training completion:")
     evaluate_model_on_dataset(llm, val_loader, train_device)
