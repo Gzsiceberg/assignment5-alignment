@@ -199,8 +199,8 @@ def main(
         ):
             if itr < last_train_iter:
                 continue
-            input_ids: torch.Tensor = batch["input_ids"].to(train_device)
-            labels: torch.Tensor = batch["labels"].to(train_device)
+            input_ids: torch.Tensor = batch["input_ids"]
+            labels: torch.Tensor = batch["labels"]
             assert input_ids.shape == (
                 batch_size,
                 seq_len,
@@ -319,8 +319,8 @@ def do_grad_accumulate(
         for s in trange(gradient_accumulation_steps, desc="Micro-batches", leave=False):
             start_idx = s * micro_batch_size
             end_idx = (s + 1) * micro_batch_size
-            input_ids_mb = input_ids[start_idx:end_idx]
-            labels_mb = labels[start_idx:end_idx]
+            input_ids_mb = input_ids[start_idx:end_idx].to(train_device)
+            labels_mb = labels[start_idx:end_idx].to(train_device)
             logits: torch.Tensor = llm(input_ids_mb).logits  # type: ignore
             vocab_size = logits.size(-1)
             assert logits.shape == (
