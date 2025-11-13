@@ -107,7 +107,7 @@ def main(
     checkpoint_dir = f"{model_id}-fine-tuned"
     llm: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_id if not resume else checkpoint_dir,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
