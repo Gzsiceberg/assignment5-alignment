@@ -315,7 +315,7 @@ def do_grad_accumulate(
     labels: torch.Tensor,
 ) -> torch.Tensor:
     total_loss = torch.tensor(0.0, device=train_device)
-    with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         for s in trange(gradient_accumulation_steps, desc="Micro-batches", leave=False):
             start_idx = s * micro_batch_size
             end_idx = (s + 1) * micro_batch_size
