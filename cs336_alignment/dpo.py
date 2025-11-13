@@ -162,7 +162,7 @@ def eval_dpo_loss(
     beta: float,
     dataset: datasets.Dataset,
 ) -> float:
-    with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    with torch.inference_mode(True), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         total_loss = 0.0
         for example in tqdm(dataset, total=len(dataset), desc="Evaluating", leave=False):
             prompt = example["prompt"]  # type: ignore
