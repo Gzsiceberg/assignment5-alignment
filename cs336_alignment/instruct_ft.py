@@ -189,13 +189,9 @@ def main(
     start_time = time.time()
     moving_avg_loss = torch.tensor(0.0, device=train_device)
     for epoch in tqdm(range(max_epochs)):
-        remaining_iters = train_steps - last_train_iter 
-        train_steps_this_epoch = min(remaining_iters, len(loader))
-        print_and_log(f"Starting epoch {epoch+1}/{max_epochs} for {train_steps_this_epoch} iterations.")
-
-        for itr, batch in (tpar := tqdm(enumerate(loader), total=train_steps_this_epoch, desc=f"Epoch {epoch+1}")):
-            if itr >= train_steps_this_epoch:
-                break
+        for itr, batch in (tpar := tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch+1}")):
+            if itr <= last_train_iter:
+                continue
             input_ids: torch.Tensor = batch["input_ids"].to(train_device)
             labels: torch.Tensor = batch["labels"].to(train_device)
             assert input_ids.shape == (
