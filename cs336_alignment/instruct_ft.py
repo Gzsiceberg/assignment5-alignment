@@ -1,5 +1,5 @@
 import shutil
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 import os
 import torch
 from datasets import load_dataset, Dataset
@@ -104,7 +104,7 @@ def main(
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     train_device = "cuda:0"
     checkpoint_dir = f"{model_id}-fine-tuned"
-    llm: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(
+    llm: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_id if not resume else checkpoint_dir,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
