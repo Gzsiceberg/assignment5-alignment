@@ -204,28 +204,7 @@ def main(
                 seq_len,
             ), f"labels shape: {labels.shape}"
 
-            total_loss = torch.tensor(0.0, device=train_device)
-            with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
-                for s in trange(
-                    gradient_accumulation_steps, desc="Micro-batches", leave=False
-                ):
-                    start_idx = s * micro_batch_size
-                    end_idx = (s + 1) * micro_batch_size
-                    input_ids_mb = input_ids[start_idx:end_idx]
-                    labels_mb = labels[start_idx:end_idx]
-                    logits = llm(input_ids_mb).logits  # type: ignore
-                    vocab_size = logits.size(-1)
-                    assert logits.shape == (
-                        micro_batch_size,
-                        seq_len,
-                        vocab_size,
-                    ), f"logits shape: {logits.shape}"
-                    loss = (
-                        F.cross_entropy(logits.view(-1, vocab_size), labels_mb.view(-1))
-                        / gradient_accumulation_steps
-                    )
-                    loss.backward()
-                    total_loss += loss.detach()
+            total_loss = do_grad_accumulate(gradient_accumulation_steps, train_device, llm, seq_len, micro_batch_size, input_ids, labels)
 
             if itr == 0 and epoch == 0:
                 moving_avg_loss = total_loss.detach()
@@ -287,6 +266,32 @@ def main(
     if shutdown:
         print_and_log("Shutting down the system as requested.")
         os.system("runpodctl stop pod $RUNPOD_POD_ID")
+
+def do_grad_accumulate(gradient_accumulation_steps: int, train_device: str, llm: PreTrainedModel, seq_len: int, 
+                       micro_batch_size: int, input_ids: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    total_loss = torch.tensor(0.0, device=train_device)
+    with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
+        for s in trange(
+                    gradient_accumulation_steps, desc="Micro-batches", leave=False
+                ):
+            start_idx = s * micro_batch_size
+            end_idx = (s + 1) * micro_batch_size
+            input_ids_mb = input_ids[start_idx:end_idx]
+            labels_mb = labels[start_idx:end_idx]
+            logits = llm(input_ids_mb).logits  # type: ignore
+            vocab_size = logits.size(-1)
+            assert logits.shape == (
+                        micro_batch_size,
+                        seq_len,
+                        vocab_size,
+                    ), f"logits shape: {logits.shape}"
+            loss = (
+                        F.cross_entropy(logits.view(-1, vocab_size), labels_mb.view(-1))
+                        / gradient_accumulation_steps
+                    )
+            loss.backward()
+            total_loss += loss.detach()
+    return total_loss
 
 if __name__ == "__main__":
     typer.run(main)
