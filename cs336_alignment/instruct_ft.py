@@ -23,7 +23,7 @@ def evaluate_model_on_dataset(
     total_count: int = 0
     with torch.inference_mode(True):
         for batch in tqdm(loader, total=len(loader), desc="Evaluating", leave=False):
-            if prob_filter > 0.0:
+            if prob_filter > 0.0 and total_count > 0:
                 if random.random() > prob_filter:
                     continue
             input_ids: torch.Tensor = batch["input_ids"].to(device)
@@ -156,12 +156,11 @@ def main(
         num_training_steps=train_steps,
     )
 
-    if not is_test:
-        output_dir = f"{model_id}-fine-tuned"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
-            llm.save_pretrained(output_dir)  # type: ignore
-            tokenizer.save_pretrained(output_dir)
+    output_dir = f"{model_id}-fine-tuned"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        llm.save_pretrained(output_dir)  # type: ignore
+        tokenizer.save_pretrained(output_dir)
 
     if is_test:
         print_and_log("Running in test mode with limited data. Skipping training.")
