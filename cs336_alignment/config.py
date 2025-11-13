@@ -47,6 +47,12 @@ class InstructionFineTuningConfig(BaseModel):
     use_compile: bool = False
     eval_number: int = 50
 
+class LoraParaConfig(BaseModel):
+    lora_r: int = 8
+    lora_alpha: int = 16
+    lora_dropout: float = 0.05
+    lora_target_modules: typing.List[str] = ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
+
 class DPOConfig(BaseModel):
     model_id: str = "models/Qwen/Qwen2.5-0.5B"
     lr: float = 1e-6

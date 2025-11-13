@@ -336,7 +336,7 @@ if __name__ == "__main__":
         train_sft(
             sft_config,
             train_device,
-            llm=llm,  # type: ignore
+            model=llm,  # type: ignore
             input_ids=input_ids,
             labels=labels,
             resp_mask=response_mask,

@@ -13,7 +13,7 @@ import torch.distributed as dist
 from tqdm import tqdm, trange
 from transformers import get_cosine_schedule_with_warmup  # type: ignore
 from cs336_alignment.vllm_util import init_vllm, load_policy_into_vllm_instance
-from cs336_alignment.config import load_config_from_file, SftConfig
+from cs336_alignment.config import LoraParaConfig, load_config_from_file, SftConfig
 from cs336_alignment.logger import setup_logging, print_and_log
 from cs336_alignment.sft_helper import (
     masked_normalize,
@@ -136,12 +136,12 @@ def do_grad_accumulate(
 def train_sft(
     sft_config: SftConfig,
     train_device: str,
-    llm: PreTrainedModel,
+    model: torch.nn.Module,
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     resp_mask: torch.Tensor,
     optimizer: torch.optim.Optimizer | None = None,
-    eval_function: Callable[[PreTrainedModel], None] | None = None,
+    eval_function: Callable[[torch.nn.Module], None] | None = None,
     print_entropy: bool = False,
     use_lr_scheduler: bool = True,
 ):
@@ -164,7 +164,7 @@ def train_sft(
 
     if optimizer is None:
         optimizer = torch.optim.AdamW(
-            llm.parameters(), lr=sft_config.learning_rate, fused=True
+            model.parameters(), lr=sft_config.learning_rate, fused=True
         )
     
     def get_data_batch_fn(micro_iter, micro_batch_size):
@@ -204,7 +204,7 @@ def train_sft(
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
         total_loss, total_entropy, _ = do_grad_accumulate(
             train_device=train_device,
-            llm=llm,
+            llm=model,
             get_data_batch_fn=get_data_batch_fn,
             micro_batch_train_step_fn=micro_batch_train_step_fn,
             print_entropy=print_entropy,
@@ -214,7 +214,7 @@ def train_sft(
 
         if sft_config.clip_gradients > 0.0:
             grad_norm = torch.nn.utils.clip_grad_norm_(
-                llm.parameters(), max_norm=sft_config.clip_gradients
+                model.parameters(), max_norm=sft_config.clip_gradients
             )
             print_and_log(
                 f"GradNorm={grad_norm:.4f} ClipTo={sft_config.clip_gradients:.4f}"
@@ -236,13 +236,45 @@ def train_sft(
             (st + 1) % eval_interval == 0 or is_last_step
         ):
             print_and_log(f"Running evaluation at step {st+1}...")
-            eval_function(llm)
+            eval_function(model)
 
     end_time = time.time()
     print_and_log(
         f"Training time for {training_steps} steps: {end_time - start_time:.2f} seconds."
     )
 
+
+def apply_lora(model: PreTrainedModel) -> torch.nn.Module:
+    from peft import LoraConfig, get_peft_model
+    lora_config = LoraParaConfig()
+    peft_config = LoraConfig(
+        r=lora_config.lora_r,
+        lora_alpha=lora_config.lora_alpha,
+        lora_dropout=lora_config.lora_dropout,
+        target_modules=lora_config.lora_target_modules,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    peft_model = get_peft_model(model, peft_config)
+    trainable, total = 0, 0
+    for n, p in peft_model.named_parameters():
+        total += p.numel()
+        if p.requires_grad:
+            trainable += p.numel()
+    print_and_log(f"Trainable params: {trainable/1e6:.2f}M | Total: {total/1e6:.2f}M | Ratio: {100*trainable/total:.4f}%")
+
+
+    applied_layers = set()
+    not_used_layers = set()
+    for n, p in peft_model.named_parameters():
+        if "lora_A" in n or "lora_B" in n:
+            layer_path = n.rsplit(".lora_", 1)[0]
+            applied_layers.add(layer_path)
+        else:
+            not_used_layers.add(n)
+    print_and_log(f"LoRA applied to layers: {applied_layers}")
+    print_and_log(f"Parameters not used by LoRA: {not_used_layers}")
+    return peft_model
 
 
 if __name__ == "__main__":
@@ -281,7 +313,7 @@ if __name__ == "__main__":
     print_and_log("Loading model and tokenizer...")
     is_eval_only = args.eval
     train_device = "cuda:0"
-    llm = AutoModelForCausalLM.from_pretrained(
+    llm: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         f"models/{sft_config.model_id}",
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
@@ -291,6 +323,7 @@ if __name__ == "__main__":
         llm.eval()  # set model to evaluation mode
     else:
         llm.train()  # set model to training mode
+    llm.config.use_cache = False  # disable cache for training
 
     output_dir = f"models/{config_name}"
     os.makedirs(output_dir, exist_ok=True)
@@ -330,13 +363,22 @@ if __name__ == "__main__":
         exit(0)
 
     tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
+
+    use_lora = True
+    if use_lora:
+        model = apply_lora(llm)
+        exit(0)  # test LoRA application and exit her
+    else:
+        model = llm
+
     if sft_config.compile_model:
         print_and_log("Compiling model...")
-        llm = torch.compile(llm)  # type: ignore
+        model = torch.compile(model)  # type: ignore
+
     train_sft(
         sft_config,
         train_device,
-        llm,  # type: ignore
+        model,
         input_ids,
         labels,
         resp_mask,

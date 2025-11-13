@@ -153,7 +153,7 @@ def main(
         f"Vocabulary size: {vocab_size:,}, Training steps: {train_steps:,}, Micro-batch size: {micro_batch_size}"
     )
 
-    optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01)  # type: ignore
+    optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01, fused=True)  # type: ignore
     from transformers import get_cosine_schedule_with_warmup  # type: ignore
 
     lr_scheduler = get_cosine_schedule_with_warmup(
