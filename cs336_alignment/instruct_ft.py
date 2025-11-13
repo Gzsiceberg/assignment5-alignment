@@ -111,6 +111,7 @@ def main(
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
+    llm.config.use_cache = False  # disable cache for training
 
     seq_len = config.seq_len
     dataset = SFTDataset(
