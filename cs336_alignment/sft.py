@@ -323,6 +323,27 @@ def apply_lora(model: PreTrainedModel) -> torch.nn.Module:
         param_ratio = 100 * param_count / total if total > 0 else 0
         print_and_log(f"  ✗ {layer_type}: {param_count/1e6:.4f}M params ({param_ratio:.4f}%)")
     
+    # Estimate memory usage for training with bfloat16 and AdamW optimizer
+    print_and_log("\n=== Memory Estimation (bfloat16 + AdamW) ===")
+    
+    # Model memory: base model (bfloat16) + trainable params (bfloat16)
+    base_model_memory_gb = total * 2 / 1e9  # 2 bytes per param (bfloat16)
+    trainable_memory_gb = trainable * 2 / 1e9  # 2 bytes per trainable param
+    
+    # AdamW optimizer states: momentum and variance (float32 for both)
+    optimizer_memory_gb = trainable * 4 * 2 / 1e9  # 4 bytes * 2 states (momentum + variance)
+    
+    # Gradients (same dtype as trainable params, bfloat16)
+    gradient_memory_gb = trainable * 2 / 1e9  # 2 bytes per trainable param
+    
+    total_memory_gb = base_model_memory_gb + trainable_memory_gb + optimizer_memory_gb + gradient_memory_gb
+    
+    print_and_log(f"Model (base + trainable): {base_model_memory_gb:.2f} GB")
+    print_and_log(f"Gradients (bfloat16): {gradient_memory_gb:.2f} GB")
+    print_and_log(f"AdamW states (float32): {optimizer_memory_gb:.2f} GB")
+    print_and_log(f"Total estimated: {total_memory_gb:.2f} GB")
+    print_and_log(f"Note: Activation memory depends on batch size and sequence length")
+    
     return peft_model
 
 
@@ -416,7 +437,6 @@ if __name__ == "__main__":
     use_lora = True
     if use_lora:
         model = apply_lora(llm)
-        exit(0)  # test LoRA application and exit her
     else:
         model = llm
 
