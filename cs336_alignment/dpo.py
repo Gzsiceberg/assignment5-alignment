@@ -247,11 +247,14 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
 
     import time
     start_time = time.time()
+    print_loss_interval = 128
+    moving_avg_loss = torch.tensor(0.0, device=train_device)
     for itr, example in tqdm(enumerate(train_ds), total=training_steps, desc="Training"):
         prompt = example["prompt"] # type: ignore
         response_chosen = example["good"] # type: ignore
         response_rejected = example["bad"] # type: ignore
 
+        total_loss = torch.tensor(0.0, device=train_device)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             loss = dpo_loss(
                 llm,
@@ -261,15 +264,22 @@ def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path t
                 prompt=prompt,
                 response_chosen=response_chosen,
                 response_rejected=response_rejected,
-            )
+            ) / gradient_accumulation_steps
+            total_loss += loss.detach()
             loss.backward()
         
-        if (itr + 1) % gradient_accumulation_steps == 0:
+        if itr == 0:
+            moving_avg_loss = total_loss
+        else:
+            moving_avg_loss = 0.9 * moving_avg_loss + 0.1 * total_loss
+        
+        if (itr + 1) % print_loss_interval == 0:
+            grad_norm = torch.nn.utils.clip_grad_norm_(llm.parameters(), max_norm=1.0)
             optimizer.step()
             optimizer.zero_grad()
-            print_and_log(f"Iter={itr}/{training_steps} loss={loss.item():.4f}")
+            print_and_log(f"Iter={itr}/{training_steps} loss={moving_avg_loss.item():.4f} grad_norm={grad_norm:.4f}")
         
-        if (itr + 1) % eval_interval == 0 or (itr + 1) % gradient_accumulation_steps == 0:
+        if (itr + 1) % eval_interval == 0 or itr + 1 == gradient_accumulation_steps:
             # Evaluation code can be added here
             eval_loss = eval_dpo_loss(
                 llm,
