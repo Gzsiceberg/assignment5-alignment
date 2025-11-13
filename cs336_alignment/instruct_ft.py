@@ -184,7 +184,7 @@ def main(
     
     print_gpu_memory("Before optimizer creation")
 
-    optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01, fused=True)
+    optimizer = torch.optim.AdamW(llm.parameters(), lr=config.lr, betas=(0.9, 0.95), weight_decay=0.01)
     from transformers import get_cosine_schedule_with_warmup  # type: ignore
 
     lr_scheduler = get_cosine_schedule_with_warmup(
