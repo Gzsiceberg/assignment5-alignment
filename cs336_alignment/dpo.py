@@ -281,16 +281,16 @@ def train(
     optimizer = torch.optim.RMSprop(llm.parameters(), lr=dpo_config.lr)  # type: ignore
     gradient_accumulation_steps = dpo_config.gradient_accumulation_steps
     training_steps = len(train_ds)
-    eval_interval = training_steps // 50 if not is_test else 32
-    save_interval = gradient_accumulation_steps * 100
-    print_and_log(f"Training steps: {training_steps}, Eval interval: {eval_interval}")
+    eval_interval = training_steps // 50 if not is_test else 64
+    save_interval = min(gradient_accumulation_steps * 100, training_steps)
+    print_loss_interval = 128 if not is_test else 8
+    print_and_log(f"Training steps: {training_steps}, Eval interval: {eval_interval} loss interval: {print_loss_interval} save interval: {save_interval}")
 
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
         tokenizer.save_pretrained(checkpoint_dir)
 
     start_time = time.time()
-    print_loss_interval = 128
     moving_avg_loss = torch.tensor(0.0, device=train_device)
     if resume:
         last_iter: int = load_checkpoint(
@@ -350,7 +350,7 @@ def train(
                 beta=0.1,
                 dataset=test_ds,
             )
-            print_and_log(f"Eval loss at iter {itr}: {eval_loss:.4f}")
+            print_and_log(f"Iter={itr + 1}/{training_steps} eval_loss={eval_loss:.4f}")
         
         if (itr + 1) % save_interval == 0 or itr + 1 == gradient_accumulation_steps:
             tokenizer.save_pretrained(checkpoint_dir)
