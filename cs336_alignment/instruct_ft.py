@@ -3,7 +3,6 @@ import time
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 import os
 import torch
-from datasets import load_dataset, Dataset
 from cs336_alignment.config import InstructionFineTuningConfig, load_config_from_file
 from cs336_alignment.logger import setup_logging, print_and_log
 import random
@@ -17,10 +16,10 @@ import torch.nn.functional as F
 def evaluate_model_on_dataset(
     llm: PreTrainedModel,
     loader: torch.utils.data.DataLoader,
-    device: str,
     prob_filter: float = 0.0,
 ):
     llm.eval()
+    device = llm.device
     total_loss = torch.tensor(0.0, device=device)
     total_count: int = 0
     with torch.inference_mode(True):
@@ -180,7 +179,7 @@ def main(
 
     if is_test:
         print_and_log("Running in test mode with limited data. Skipping training.")
-        evaluate_model_on_dataset(llm, val_loader, train_device)
+        evaluate_model_on_dataset(llm, val_loader)
 
     eval_interval = train_steps // config.eval_number
     if eval_interval == 0:
@@ -190,7 +189,7 @@ def main(
     )
 
     start_time = time.time()
-    moving_avg_loss = torch.tensor(0.0, device=train_device)
+    moving_avg_loss = torch.tensor(0.0, device=llm.device)
     for epoch in tqdm(range(max_epochs)):
         iter_per_epoch = len(loader)
         for itr, batch in (
@@ -247,7 +246,7 @@ def main(
                     f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
                 )
                 evaluate_model_on_dataset(
-                    llm, val_loader, train_device, 0.05 if not is_test else 0.0
+                    llm, val_loader, 0.05 if not is_test else 0.0
                 )
                 # Save checkpoint after evaluation
                 safe_save_checkpoint(
@@ -255,7 +254,7 @@ def main(
                 )
 
     print_and_log("Final evaluation after training completion:")
-    evaluate_model_on_dataset(llm, val_loader, train_device)
+    evaluate_model_on_dataset(llm, val_loader)
 
     if not is_test:
         # Save the fine-tuned model
