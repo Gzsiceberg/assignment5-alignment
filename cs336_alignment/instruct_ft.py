@@ -1,5 +1,6 @@
 import shutil
 import time
+import gc
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 import os
 import torch
@@ -36,11 +37,20 @@ def evaluate_model_on_dataset(
             assert loss.dim() == 0, f"Loss dimension expected to be 0, got {loss.dim()}"
             total_loss += loss
             total_count += 1
+            
+            # Clear memory after each batch during evaluation
+            del input_ids, labels, logits, loss
+            if total_count % 10 == 0:
+                torch.cuda.empty_cache()
 
     avg_loss = total_loss.item() / total_count
     perplexity = np.exp(avg_loss)
     print_and_log(f"Evaluation Loss: {avg_loss:.4f}, Perplexity: {perplexity:.4f}")
     llm.train()
+    
+    # Clean up memory after evaluation
+    torch.cuda.empty_cache()
+    gc.collect()
 
 
 def save_checkpoint(
@@ -111,6 +121,10 @@ def main(
         device_map={"": train_device},
     )
     llm.config.use_cache = False  # disable cache for training
+    
+    # Enable gradient checkpointing to save memory
+    llm.gradient_checkpointing_enable()
+    print_and_log("Gradient checkpointing enabled to reduce memory usage")
 
     seq_len = config.seq_len
     dataset = SFTDataset(
@@ -134,10 +148,10 @@ def main(
         f"Total training samples: {total_samples} Total validation samples: {len(val_dataset)}"
     )
     loader: torch.utils.data.DataLoader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=True, drop_last=True
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True, pin_memory=False
     )
     val_loader: torch.utils.data.DataLoader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=4, shuffle=False, drop_last=True
+        val_dataset, batch_size=4, shuffle=False, drop_last=True, pin_memory=False
     )
 
     if config.use_compile:
@@ -233,6 +247,11 @@ def main(
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
+            
+            # Clear unused tensors and cache periodically
+            if itr % 50 == 0:
+                torch.cuda.empty_cache()
+                gc.collect()
 
             if itr % 10 == 0:
                 tpar.set_description(f"Loss: {moving_avg_loss.item():.4f}")
@@ -335,6 +354,9 @@ def do_grad_accumulate(
             )
             loss.backward()
             total_loss += loss.detach()
+            
+            # Clear tensors after each micro-batch
+            del input_ids_mb, labels_mb, logits, loss
     return total_loss
 
 
