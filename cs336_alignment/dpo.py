@@ -352,6 +352,7 @@ def train(
             print_and_log(f"Eval loss at iter {itr}: {eval_loss:.4f}")
         
         if (itr + 1) % save_interval == 0 or itr + 1 == gradient_accumulation_steps:
+            tokenizer.save_pretrained(checkpoint_dir)
             save_checkpoint_safe(checkpoint_dir, llm, optimizer, time, itr)
 
     # Save final model
