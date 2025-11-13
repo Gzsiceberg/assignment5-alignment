@@ -190,7 +190,7 @@ def main(
     moving_avg_loss = torch.tensor(0.0, device=train_device)
     for epoch in tqdm(range(max_epochs)):
         for itr, batch in (tpar := tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch+1}")):
-            if itr <= last_train_iter:
+            if itr < last_train_iter:
                 continue
             input_ids: torch.Tensor = batch["input_ids"].to(train_device)
             labels: torch.Tensor = batch["labels"].to(train_device)
@@ -243,6 +243,7 @@ def main(
                     f"Epoch {epoch+1} Iter {itr+1}/{train_steps_this_epoch}, Loss: {moving_avg_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}"
                 )
 
+            last_train_iter += 1
             if (itr + 1) % eval_interval == 0 or (itr == 10 and not resume):
                 print_and_log(
                     f"--- Evaluation at Epoch {epoch+1} Iteration {itr+1} ---"
@@ -259,7 +260,7 @@ def main(
                 save_checkpoint(
                     optimizer,
                     lr_scheduler,
-                    last_iter=itr,
+                    last_iter=last_train_iter,
                     checkpoint_path=tmp_checkpoint_path,
                 )
                 # rename temp directory to main checkpoint directory
@@ -268,7 +269,6 @@ def main(
                 os.rename(tmp_checkpoint_dir, checkpoint_dir)
                 save_end_time = time.time()
                 print_and_log(f"Model checkpoint saved to {checkpoint_dir} after evaluation. Time taken: {save_end_time - save_start_time:.2f} seconds.")
-            last_train_iter += 1
 
     print_and_log("Final evaluation after training completion:")
     evaluate_model_on_dataset(llm, val_loader, train_device)
