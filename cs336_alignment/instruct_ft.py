@@ -63,7 +63,7 @@ def load_checkpoint(
     lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
     checkpoint_path: str,
 ) -> int:
-    checkpoint = torch.load(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, weights_only=True)
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
     print_and_log(f"Checkpoint loaded from {checkpoint_path}")
@@ -85,6 +85,7 @@ def main(
     config = InstructionFineTuningConfig(**config)
     config_name = os.path.splitext(os.path.basename(config_path))[0]
     setup_logging(f"instruct_ft_{config_name}.log")
+    print_and_log(f"{config}")
     batch_size = config.batch_size
     max_epochs = config.epochs
     gradient_accumulation_steps = config.gradient_accumulation_steps
@@ -162,6 +163,14 @@ def main(
         llm.save_pretrained(output_dir)  # type: ignore
         tokenizer.save_pretrained(output_dir)
 
+    checkpoint_path = f"{model_id}-fine-tuned/checkpoint.pth"
+    if resume:
+        last_train_iter = load_checkpoint(optimizer, lr_scheduler, checkpoint_path)
+        lr = lr_scheduler.get_last_lr()[0]
+        print_and_log(f"Resuming training from checkpoint. lr={lr:.6f}, last_iter={last_train_iter}")
+    else:
+        last_train_iter = 0
+
     if is_test:
         print_and_log("Running in test mode with limited data. Skipping training.")
         evaluate_model_on_dataset(llm, val_loader, train_device)
@@ -172,13 +181,6 @@ def main(
     print_and_log(
         f"Evaluation interval set to every {eval_interval} training iterations."
     )
-    checkpoint_path = f"{model_id}-fine-tuned/checkpoint.pth"
-    if resume:
-        last_train_iter = load_checkpoint(optimizer, lr_scheduler, checkpoint_path)
-        lr = lr_scheduler.get_last_lr()[0]
-        print_and_log(f"Resuming training from checkpoint. lr={lr:.6f}, last_iter={last_train_iter}")
-    else:
-        last_train_iter = 0
     
     import time
     start_time = time.time()
