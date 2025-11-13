@@ -14,7 +14,7 @@ import torch.nn.functional as F
 
 
 def evaluate_model_on_dataset(
-    llm: AutoModelForCausalLM,
+    llm: PreTrainedModel,
     loader: torch.utils.data.DataLoader,
     device: str,
     prob_filter: float = 0.0,
@@ -189,7 +189,8 @@ def main(
     start_time = time.time()
     moving_avg_loss = torch.tensor(0.0, device=train_device)
     for epoch in tqdm(range(max_epochs)):
-        for itr, batch in (tpar := tqdm(enumerate(loader), total=len(loader), desc=f"Epoch {epoch+1}")):
+        iter_per_epoch = len(loader)
+        for itr, batch in (tpar := tqdm(enumerate(loader), total=iter_per_epoch, desc=f"Epoch {epoch+1}")):
             if itr < last_train_iter:
                 continue
             input_ids: torch.Tensor = batch["input_ids"].to(train_device)
@@ -240,7 +241,7 @@ def main(
             if itr % 10 == 0:
                 tpar.set_description(f"Loss: {moving_avg_loss.item():.4f}")
                 print_and_log(
-                    f"Epoch {epoch+1} Iter {itr+1}/{train_steps_this_epoch}, Loss: {moving_avg_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}"
+                    f"Epoch {epoch+1} Iter {itr+1}/{iter_per_epoch}, Loss: {moving_avg_loss.item():.4f}, Grad Norm: {grad_norm.item():.4f}, LR: {current_lr:.6f}"
                 )
 
             last_train_iter += 1
