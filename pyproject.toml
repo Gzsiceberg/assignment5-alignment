@@ -15,7 +15,7 @@ dependencies = [
     "pytest>=8.3.5",
     "torch",
     "tqdm>=4.67.1",
-    "transformers>=4.52.0",
+    "transformers>=4.50.0",
     "typer>=0.15.4",
     "vllm==0.7.2",
     "wandb>=0.19.8",
@@ -26,7 +26,7 @@ dependencies = [
     "huggingface-hub>=0.31.1",
     "jaxtyping>=0.3.3",
     "modelscope>=1.31.0",
-    "peft>=0.18.0",
+    "peft>=0.13.0,<0.14.0",
 ]
 
 [tool.setuptools.packages.find]
