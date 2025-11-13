@@ -20,7 +20,7 @@ def evaluate_model_on_dataset(
     device: str,
     prob_filter: float = 0.0,
 ):
-    llm.eval()  # type: ignore
+    llm.eval()
     total_loss = torch.tensor(0.0, device=device)
     total_count: int = 0
     with torch.inference_mode(True):
@@ -30,7 +30,7 @@ def evaluate_model_on_dataset(
                     continue
             input_ids: torch.Tensor = batch["input_ids"].to(device)
             labels: torch.Tensor = batch["labels"].to(device)
-            logits = llm(input_ids).logits  # type: ignore
+            logits: torch.Tensor = llm(input_ids).logits  # type: ignore
 
             vocab_size = logits.size(-1)
             loss = F.cross_entropy(logits.view(-1, vocab_size), labels.view(-1))
@@ -41,7 +41,7 @@ def evaluate_model_on_dataset(
     avg_loss = total_loss.item() / total_count
     perplexity = np.exp(avg_loss)
     print_and_log(f"Evaluation Loss: {avg_loss:.4f}, Perplexity: {perplexity:.4f}")
-    llm.train()  # type: ignore
+    llm.train()
 
 
 def save_checkpoint(
