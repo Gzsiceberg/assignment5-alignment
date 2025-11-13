@@ -264,16 +264,65 @@ def apply_lora(model: PreTrainedModel) -> torch.nn.Module:
     print_and_log(f"Trainable params: {trainable/1e6:.2f}M | Total: {total/1e6:.2f}M | Ratio: {100*trainable/total:.4f}%")
 
 
-    applied_layers = set()
-    not_used_layers = set()
+    # Collect layers where LoRA is applied and layers without LoRA
+    applied_lora_types = {}  # layer_type -> count
+    layers_without_lora = {}  # layer_type -> param_count
+    
+    # Helper function to extract layer type (remove layer numbers and base_model prefix)
+    def get_layer_type(layer_path: str) -> str:
+        # Remove base_model.model prefix if present
+        path = layer_path.replace("base_model.model.", "")
+        # Remove .base_layer suffix (added by PEFT for original weights)
+        path = path.replace(".base_layer", "")
+        # Remove layer numbers like "layers.0.", "layers.19." etc.
+        import re
+        path = re.sub(r'\.layers\.\d+\.', '.layers.X.', path)
+        path = re.sub(r'^layers\.\d+\.', 'layers.X.', path)
+        return path
+    
+    # First pass: find all layers with LoRA
     for n, p in peft_model.named_parameters():
         if "lora_A" in n or "lora_B" in n:
+            # Extract the base layer path (before .lora_A or .lora_B)
             layer_path = n.rsplit(".lora_", 1)[0]
-            applied_layers.add(layer_path)
+            layer_type = get_layer_type(layer_path)
+            applied_lora_types[layer_type] = applied_lora_types.get(layer_type, 0) + 1
+    
+    # Second pass: find all layers without LoRA
+    for n, p in peft_model.named_parameters():
+        # Skip LoRA parameters themselves
+        if "lora_A" in n or "lora_B" in n:
+            continue
+        
+        # Get the layer path (remove .weight, .bias, etc.)
+        if ".weight" in n or ".bias" in n:
+            layer_path = n.rsplit(".", 1)[0]
         else:
-            not_used_layers.add(n)
-    print_and_log(f"LoRA applied to layers: {applied_layers}")
-    print_and_log(f"Parameters not used by LoRA: {not_used_layers}")
+            layer_path = n
+        
+        layer_type = get_layer_type(layer_path)
+        
+        # Check if this layer type has LoRA applied
+        has_lora = layer_type in applied_lora_types
+        
+        if not has_lora:
+            if layer_type not in layers_without_lora:
+                layers_without_lora[layer_type] = 0
+            layers_without_lora[layer_type] += p.numel()
+    
+    print_and_log(f"\nLoRA applied layer types ({len(applied_lora_types)} types):")
+    for layer_type in sorted(applied_lora_types.keys()):
+        count = applied_lora_types[layer_type]
+        print_and_log(f"  ✓ {layer_type} (x{count})")
+    
+    total_params_without_lora = sum(layers_without_lora.values())
+    ratio_without_lora = 100 * total_params_without_lora / total if total > 0 else 0
+    print_and_log(f"\nLayer types WITHOUT LoRA ({len(layers_without_lora)} types, {total_params_without_lora/1e6:.2f}M params, {ratio_without_lora:.2f}% of total):")
+    for layer_type in sorted(layers_without_lora.keys()):
+        param_count = layers_without_lora[layer_type]
+        param_ratio = 100 * param_count / total if total > 0 else 0
+        print_and_log(f"  ✗ {layer_type}: {param_count/1e6:.4f}M params ({param_ratio:.4f}%)")
+    
     return peft_model
 
 
