@@ -326,8 +326,10 @@ def train(
             )
             total_loss += loss.detach()
             loss.backward()
+        
+        is_last_step = (itr + 1) == remain_steps
             
-        if (itr + 1) % gradient_accumulation_steps == 0:
+        if (itr + 1) % gradient_accumulation_steps == 0 or is_last_step:
             with torch.no_grad():
                 if (itr + 1) == gradient_accumulation_steps:
                     moving_avg_loss = total_loss
@@ -341,7 +343,7 @@ def train(
                 f"Iter={itr + 1}/{training_steps} loss={moving_avg_loss.item():.4f} grad_norm={grad_norm:.4f}"
             )
 
-        if (itr + 1) % eval_interval == 0 or itr + 1 == gradient_accumulation_steps:
+        if (itr + 1) % eval_interval == 0 or itr + 1 == gradient_accumulation_steps or is_last_step:
             # Evaluation code can be added here
             eval_loss = eval_dpo_loss(
                 llm,
