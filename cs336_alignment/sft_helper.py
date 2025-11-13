@@ -42,6 +42,7 @@ def get_response_log_probs(
     return_token_entropy: bool = False,
 ) -> dict[str, torch.Tensor]:
     logits = model(input_ids=input_ids).logits
+    # when index has -1, gather will return 0, which is ok since we will mask it out later
     gathered = logits.gather(dim=-1, index=labels.long().unsqueeze(-1)).squeeze(-1)
     row_logsumexp = torch.logsumexp(logits, dim=-1)
     log_probs_for_labels = gathered - row_logsumexp

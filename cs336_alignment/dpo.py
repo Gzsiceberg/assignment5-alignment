@@ -18,26 +18,90 @@ prompt_template = """Below is an instruction that describes a task. Write a resp
 ### Response:
 {response}"""
 
-def compute_logp_delta(model: torch.nn.Module,
-                       good_input_ids: torch.Tensor,
-                       bad_input_ids: torch.Tensor) -> torch.Tensor:
-    good_input_ids = good_input_ids.to(model.device)
-    bad_input_ids = bad_input_ids.to(model.device)
-    
-    logp_good = get_response_log_probs(model, good_input_ids[:-1], good_input_ids[1:])["log_probs"]
-    logp_bad = get_response_log_probs(model, bad_input_ids[:-1], bad_input_ids[1:])["log_probs"]
-    logp_delta = (logp_good - logp_bad).sum(-1)
-    return logp_delta
-    
 
-def _tokenizer_encode(
-    tokenizer: PreTrainedTokenizerBase,
-    prompt: str,
-    response: str,
+def compute_logp_delta(
+    model: torch.nn.Module, input_ids: torch.Tensor, resp_mask: torch.Tensor
 ) -> torch.Tensor:
-    full_prompt = prompt_template.format(instruction=prompt, response=response)
-    input_ids = tokenizer.encode(full_prompt) + [tokenizer.eos_token_id]
-    return torch.tensor(input_ids)
+    """Compute log prob delta between chosen and rejected responses.
+
+    Args:
+        model: The language model
+        input_ids: (batch_size, seq_len) where batch_size must be even.
+                   First half are chosen responses, second half are rejected.
+        resp_mask: (batch_size, seq_len) mask indicating response tokens
+
+    Returns:
+        Scalar tensor with log prob delta
+    """
+    batch_size, seq_len = input_ids.shape
+    assert batch_size % 2 == 0, "Batch size must be even."
+    half_batch_size = batch_size // 2
+
+    input_ids = input_ids.to(model.device)
+    resp_mask = resp_mask.to(model.device)
+
+    # Get log probs for all tokens (batch_size, seq_len-1)
+    logp = get_response_log_probs(model, input_ids[:, :-1], input_ids[:, 1:])[
+        "log_probs"
+    ]
+
+    # Mask to only include response tokens (batch_size, seq_len-1)
+    masked_logp = logp * resp_mask[:, 1:]
+
+    # Sum over sequence dimension for each example
+    logp_chosen = masked_logp[:half_batch_size].sum(dim=-1)  # (half_batch_size,)
+    logp_rejected = masked_logp[half_batch_size:].sum(dim=-1)  # (half_batch_size,)
+
+    # Return delta for each pair
+    logp_delta = logp_chosen - logp_rejected  # (half_batch_size,)
+    return logp_delta
+
+
+def tokenizer_encode_batch(
+    tokenizer: PreTrainedTokenizerBase,
+    prompts: list[str],
+    responses: list[str],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Tokenize prompts and responses, creating proper response masks.
+
+    Args:
+        tokenizer: The tokenizer
+        prompts: List of prompt strings
+        responses: List of response strings
+
+    Returns:
+        input_ids_batch: (batch_size, max_seq_len) padded token IDs
+        response_mask: (batch_size, max_seq_len) mask where 1 = response token, 0 = prompt/padding
+    """
+    input_ids_list = []
+    response_mask_list = []
+
+    eos_token_id: int = tokenizer.eos_token_id # type: ignore
+    for prompt, response in zip(prompts, responses):
+        # Tokenize prompt and response separately
+        content = prompt_template.format(instruction=prompt, response=response)
+        all_tokens = tokenizer.encode(content)
+        all_tokens.append(eos_token_id)
+
+        input_ids = torch.tensor(all_tokens, dtype=torch.long)
+        # Create mask: 1 for response tokens, 0 for prompt tokens
+        response_mask = torch.ones(len(all_tokens), dtype=torch.float)
+
+        input_ids_list.append(input_ids)
+        response_mask_list.append(response_mask)
+
+    # Pad sequences
+    pad_value = 0
+    input_ids_batch = torch.nn.utils.rnn.pad_sequence(
+        input_ids_list, batch_first=True, padding_value=float(pad_value)
+    ).long()
+
+    response_mask_batch = torch.nn.utils.rnn.pad_sequence(
+        response_mask_list, batch_first=True, padding_value=0.0
+    )
+
+    return input_ids_batch, response_mask_batch
+
 
 def dpo_loss(
     policy_model: torch.nn.Module,
@@ -48,19 +112,34 @@ def dpo_loss(
     response_chosen: str,
     response_rejected: str,
 ) -> torch.Tensor:
-    good_input_ids = _tokenizer_encode(tokenizer, prompt, response_chosen)
-    bad_input_ids = _tokenizer_encode(tokenizer, prompt, response_rejected)
+    """Compute DPO loss for a single prompt with chosen/rejected responses.
 
-    logp_policy_delta = compute_logp_delta(policy_model, good_input_ids, bad_input_ids)
+    More efficient implementation that does one forward pass per model.
+    """
+    # Batch encode: [chosen, rejected]
+    input_ids_batch, response_mask_batch = tokenizer_encode_batch(
+        tokenizer, [prompt, prompt], [response_chosen, response_rejected]
+    )
+
+    # Compute log prob deltas (one forward pass per model)
+    logp_policy_delta = compute_logp_delta(
+        policy_model, input_ids_batch, response_mask_batch
+    )
+
     with torch.inference_mode():
-        logp_ref_delta = compute_logp_delta(ref_model, good_input_ids, bad_input_ids)
+        logp_ref_delta = compute_logp_delta(
+            ref_model, input_ids_batch, response_mask_batch
+        )
         logp_ref_delta = logp_ref_delta.to(logp_policy_delta.device)
-    
+
+    # DPO loss: -log sigmoid(beta * (log_pi_chosen/rejected - log_ref_chosen/rejected))
     loss = -F.logsigmoid(beta * (logp_policy_delta - logp_ref_delta))
-    return loss
+    return loss.mean()  # Average over batch (should be single value for one example)
+
 
 if __name__ == "__main__":
-    from transformers import AutoModelForCausalLM, AutoTokenizer # type: ignore
+    from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+
     FIXTURES_PATH = os.path.join(os.path.dirname(__file__), "..", "tests", "fixtures")
     tokenizer = AutoTokenizer.from_pretrained("gpt2")
 
