@@ -164,7 +164,7 @@ def eval_dpo_loss(
 ) -> float:
     with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         total_loss = 0.0
-        for example in dataset:
+        for example in tqdm(dataset, total=len(dataset), desc="Evaluating"):
             prompt = example["prompt"]  # type: ignore
             response_chosen = example["good"]  # type: ignore
             response_rejected = example["bad"]  # type: ignore
@@ -183,13 +183,19 @@ def eval_dpo_loss(
     return avg_loss
 
 
-def train(config_path: str = typer.Argument("configs/dpo.yaml", help="Path to config file"),
+def train(config_path: str = typer.Argument("config/dpo_test.yaml", help="Path to config file"),
           limit: int = typer.Option(-1, "-l", help="Limit number of training examples (-1 for no limit)")):
     
+    seed = 52
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
     config = load_config_from_file(config_path)
     dpo_config = DPOConfig(**config)
     config_name = os.path.splitext(os.path.basename(config_path))[0]
     setup_logging(f"dpo_{config_name}.log")
+    print_and_log(f"{dpo_config}")
 
     is_test = "_test.yaml" in config_name.lower()
 
@@ -226,10 +232,14 @@ def train(config_path: str = typer.Argument("configs/dpo.yaml", help="Path to co
         train_ds = train_ds.select(range(limit))
 
     train_ds = train_ds.shuffle()
+    test_ds = test_ds.shuffle()
+    test_ds = test_ds.select(range(256))
+
     optimizer = torch.optim.RMSprop(llm.parameters(), lr=dpo_config.lr) # type: ignore
     gradient_accumulation_steps = dpo_config.gradient_accumulation_steps
     training_steps = len(train_ds)
-    eval_steps = training_steps // 100 if not is_test else 10
+    eval_interval = training_steps // 100 if not is_test else 20
+    print_and_log(f"Training steps: {training_steps}, Eval interval: {eval_interval}")
 
     if not os.path.exists(output_model_id):
         os.makedirs(output_model_id)
@@ -237,7 +247,7 @@ def train(config_path: str = typer.Argument("configs/dpo.yaml", help="Path to co
 
     import time
     start_time = time.time()
-    for itr, example in tqdm(enumerate(train_ds), total=training_steps):
+    for itr, example in tqdm(enumerate(train_ds), total=training_steps, desc="Training"):
         prompt = example["prompt"] # type: ignore
         response_chosen = example["good"] # type: ignore
         response_rejected = example["bad"] # type: ignore
@@ -257,9 +267,9 @@ def train(config_path: str = typer.Argument("configs/dpo.yaml", help="Path to co
         if (itr + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
-            print_and_log(f"Iter={itr}/{training_steps} loss={loss.item():,}")
+            print_and_log(f"Iter={itr}/{training_steps} loss={loss.item():.4f}")
         
-        if (itr + 1) % eval_steps == 0 or (itr + 1) % gradient_accumulation_steps == 0:
+        if (itr + 1) % eval_interval == 0 or (itr + 1) % gradient_accumulation_steps == 0:
             # Evaluation code can be added here
             eval_loss = eval_dpo_loss(
                 llm,
@@ -268,7 +278,7 @@ def train(config_path: str = typer.Argument("configs/dpo.yaml", help="Path to co
                 beta=0.1,
                 dataset=test_ds,
             )
-            print_and_log(f"Eval loss at iter {itr}: {eval_loss:,}")
+            print_and_log(f"Eval loss at iter {itr}: {eval_loss:.4f}")
     
     # Save final model
     llm.save_pretrained(output_model_id)
