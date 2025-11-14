@@ -209,6 +209,7 @@ def main(
 
     start_time = time.time()
     moving_avg_loss = torch.tensor(0.0, device=llm.device)
+    first_iteration = True
     for epoch in tqdm(range(max_epochs)):
         iter_per_epoch = len(loader)
         for itr, batch in (
@@ -240,8 +241,9 @@ def main(
 
             # Update moving average of loss
             with torch.no_grad():
-                if itr == 0 and epoch == 0:
+                if first_iteration:
                     moving_avg_loss = total_loss.detach()
+                    first_iteration = False
                 else:
                     moving_avg_loss = (
                         0.9 * moving_avg_loss.detach() + 0.1 * total_loss.detach()
