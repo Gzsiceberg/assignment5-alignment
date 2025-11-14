@@ -299,15 +299,15 @@ def train(
         print_and_log(f"Resuming training from iteration {last_iter}")
     else:
         last_iter = 0
-    remain_steps = training_steps - last_iter
     total_loss = torch.tensor(0.0, device=train_device)
+    is_first_step = True
     for itr, example in tqdm(
-        enumerate(train_ds), total=remain_steps, desc="Training"
+        enumerate(train_ds), total=training_steps, desc="Training"
     ):
-        if itr >= remain_steps:
-            break
+        if itr < last_iter:
+            continue
 
-        prompt = example["prompt"]  # type: ignore
+        prompt = example["prompt"] # type: ignore
         response_chosen = example["good"]  # type: ignore
         response_rejected = example["bad"]  # type: ignore
 
@@ -327,12 +327,13 @@ def train(
             total_loss += loss.detach()
             loss.backward()
         
-        is_last_step = (itr + 1) == remain_steps
+        is_last_step = (itr + 1) == training_steps
             
         if (itr + 1) % gradient_accumulation_steps == 0 or is_last_step:
             with torch.no_grad():
-                if (itr + 1) == gradient_accumulation_steps:
+                if is_first_step:
                     moving_avg_loss = total_loss
+                    is_first_step = False
                 else:
                     moving_avg_loss = 0.9 * moving_avg_loss + 0.1 * total_loss
             total_loss = torch.tensor(0.0, device=train_device)
@@ -356,7 +357,7 @@ def train(
         
         if (itr + 1) % save_interval == 0 or itr + 1 == gradient_accumulation_steps:
             tokenizer.save_pretrained(checkpoint_dir)
-            save_checkpoint_safe(checkpoint_dir, llm, optimizer, time, itr)
+            save_checkpoint_safe(checkpoint_dir, llm, optimizer, itr + 1)
 
     # Save final model
     llm.save_pretrained(checkpoint_dir)
@@ -379,7 +380,7 @@ def train(
         print_and_log("Shutting down the system as requested.")
         os.system("runpodctl stop pod $RUNPOD_POD_ID")
 
-def save_checkpoint_safe(checkpoint_dir, llm, optimizer, time, itr):
+def save_checkpoint_safe(checkpoint_dir, llm, optimizer, itr):
     save_start_time = time.time()
     tmp_checkpoint_dir = f"{checkpoint_dir}_temp"
     if not os.path.exists(tmp_checkpoint_dir):
