@@ -445,9 +445,9 @@ if __name__ == "__main__":
     else:
         model = llm
 
-    if sft_config.compile_model:
-        print_and_log("Compiling model...")
-        model = torch.compile(model)  # type: ignore
+    # if sft_config.compile_model:
+    #     print_and_log("Compiling model...")
+    #     model = torch.compile(model)  # type: ignore
 
     train_sft(
         sft_config,

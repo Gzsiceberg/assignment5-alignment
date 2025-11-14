@@ -158,6 +158,7 @@ def main(
         val_dataset, batch_size=4, shuffle=False, drop_last=True, pin_memory=False
     )
 
+    # Can't compile model, because transformers version 4.57.0 has issues with torch.compile
     # if config.use_compile:
     #     torch.set_float32_matmul_precision("high")
     #     llm = torch.compile(llm)  # type: ignore
