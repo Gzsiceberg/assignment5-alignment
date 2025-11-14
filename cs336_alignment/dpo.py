@@ -24,9 +24,7 @@ prompt_template = """Below is an instruction that describes a task. Write a resp
 {response}"""
 
 
-def compute_logp_delta(
-    model: torch.nn.Module, input_ids: torch.Tensor, resp_mask: torch.Tensor
-) -> torch.Tensor:
+def compute_logp_delta(model: torch.nn.Module, input_ids: torch.Tensor, resp_mask: torch.Tensor) -> torch.Tensor:
     """Compute log prob delta between chosen and rejected responses.
 
     Args:
@@ -46,9 +44,7 @@ def compute_logp_delta(
     resp_mask = resp_mask.to(model.device)
 
     # Get log probs for all tokens (batch_size, seq_len-1)
-    logp = get_response_log_probs(model, input_ids[:, :-1], input_ids[:, 1:])[
-        "log_probs"
-    ]
+    logp = get_response_log_probs(model, input_ids[:, :-1], input_ids[:, 1:])["log_probs"]
 
     # Mask to only include response tokens (batch_size, seq_len-1)
     masked_logp = logp * resp_mask[:, 1:]
@@ -101,9 +97,7 @@ def tokenizer_encode_batch(
         input_ids_list, batch_first=True, padding_value=float(pad_value)
     ).long()
 
-    response_mask_batch = torch.nn.utils.rnn.pad_sequence(
-        response_mask_list, batch_first=True, padding_value=0.0
-    )
+    response_mask_batch = torch.nn.utils.rnn.pad_sequence(response_mask_list, batch_first=True, padding_value=0.0)
 
     return input_ids_batch, response_mask_batch
 
@@ -116,14 +110,10 @@ def dpo_loss_batch(
     beta: float,
 ) -> torch.Tensor:
     # Compute log prob deltas (one forward pass per model)
-    logp_policy_delta = compute_logp_delta(
-        policy_model, input_ids_batch, response_mask_batch
-    )
+    logp_policy_delta = compute_logp_delta(policy_model, input_ids_batch, response_mask_batch)
 
     with torch.inference_mode():
-        logp_ref_delta = compute_logp_delta(
-            ref_model, input_ids_batch, response_mask_batch
-        )
+        logp_ref_delta = compute_logp_delta(ref_model, input_ids_batch, response_mask_batch)
         logp_ref_delta = logp_ref_delta.to(logp_policy_delta.device)
 
     # DPO loss: -log sigmoid(beta * (log_pi_chosen/rejected - log_ref_chosen/rejected))
@@ -193,9 +183,7 @@ def eval_dpo_loss(
         torch.autocast(device_type="cuda", dtype=torch.bfloat16),
     ):
         total_loss = torch.tensor(0.0, device=policy_model.device)
-        for example in tqdm(
-            dataset, total=len(dataset), desc="Evaluating", leave=False
-        ):
+        for example in tqdm(dataset, total=len(dataset), desc="Evaluating", leave=False):
             prompt = example["prompt"]  # type: ignore
             response_chosen = example["good"]  # type: ignore
             response_rejected = example["bad"]  # type: ignore
@@ -215,14 +203,10 @@ def eval_dpo_loss(
 
 
 def train(
-    config_path: str = typer.Argument(
-        "config/dpo_test.yaml", help="Path to config file"
-    ),
-    limit: int = typer.Option(
-        -1, "-l", help="Limit number of training examples (-1 for no limit)"
-    ),
+    config_path: str = typer.Argument("config/dpo_test.yaml", help="Path to config file"),
+    limit: int = typer.Option(-1, "-l", help="Limit number of training examples (-1 for no limit)"),
     resume: bool = typer.Option(False, "-r", help="Resume training from checkpoint"),
-    shutdown: bool = typer.Option(False, "-d", help="Shutdown after training")
+    shutdown: bool = typer.Option(False, "-d", help="Shutdown after training"),
 ):
 
     seed = 52
@@ -301,13 +285,11 @@ def train(
         last_iter = 0
     total_loss = torch.tensor(0.0, device=train_device)
     is_first_step = True
-    for itr, example in tqdm(
-        enumerate(train_ds), total=training_steps, desc="Training"
-    ):
+    for itr, example in tqdm(enumerate(train_ds), total=training_steps, desc="Training"):
         if itr < last_iter:
             continue
 
-        prompt = example["prompt"] # type: ignore
+        prompt = example["prompt"]  # type: ignore
         response_chosen = example["good"]  # type: ignore
         response_rejected = example["bad"]  # type: ignore
 
@@ -326,9 +308,9 @@ def train(
             )
             total_loss += loss.detach()
             loss.backward()
-        
+
         is_last_step = (itr + 1) == training_steps
-            
+
         if (itr + 1) % gradient_accumulation_steps == 0 or is_last_step:
             with torch.no_grad():
                 if is_first_step:
@@ -354,7 +336,7 @@ def train(
                 dataset=test_ds,
             )
             print_and_log(f"Iter={itr + 1}/{training_steps} eval_loss={eval_loss:.4f}")
-        
+
         if (itr + 1) % save_interval == 0 or itr + 1 == gradient_accumulation_steps:
             tokenizer.save_pretrained(checkpoint_dir)
             save_checkpoint_safe(checkpoint_dir, llm, optimizer, itr + 1)
@@ -380,6 +362,7 @@ def train(
         print_and_log("Shutting down the system as requested.")
         os.system("runpodctl stop pod $RUNPOD_POD_ID")
 
+
 def save_checkpoint_safe(checkpoint_dir, llm, optimizer, itr):
     save_start_time = time.time()
     tmp_checkpoint_dir = f"{checkpoint_dir}_temp"
@@ -389,16 +372,18 @@ def save_checkpoint_safe(checkpoint_dir, llm, optimizer, itr):
 
     llm.save_pretrained(tmp_checkpoint_dir)  # type: ignore
     save_checkpoint(
-                optimizer,
-                last_iter=itr,
-                checkpoint_path=tmp_checkpoint_path,
-            )
-            # rename temp directory to main checkpoint directory
+        optimizer,
+        last_iter=itr,
+        checkpoint_path=tmp_checkpoint_path,
+    )
+    # rename temp directory to main checkpoint directory
     if os.path.exists(checkpoint_dir):
         shutil.rmtree(checkpoint_dir)
     os.rename(tmp_checkpoint_dir, checkpoint_dir)
     save_end_time = time.time()
-    print_and_log(f"Model checkpoint saved to {checkpoint_dir} after evaluation. Time taken: {save_end_time - save_start_time:.2f} seconds")
+    print_and_log(
+        f"Model checkpoint saved to {checkpoint_dir} after evaluation. Time taken: {save_end_time - save_start_time:.2f} seconds"
+    )
 
 
 if __name__ == "__main__":
