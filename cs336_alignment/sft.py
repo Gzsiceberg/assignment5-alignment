@@ -392,7 +392,7 @@ if __name__ == "__main__":
     minutes = (end_time - start_time) / 60.0
     print_and_log(f"SFT training completed in {minutes:.2f} minutes.")
 
-    llm.save_pretrained(save_directory=output_dir)  # type: ignore
+    model.save_pretrained(save_directory=output_dir)  # type: ignore
     tokenizer.save_pretrained(save_directory=output_dir)
 
     cleanup()
