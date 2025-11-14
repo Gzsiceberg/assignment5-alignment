@@ -115,7 +115,8 @@ async def evaluate_single_example(eval_data: dict, ref_data: dict) -> dict:
 async def alpaca_eval_async(data_path: str, limit: int = 0):
     """Async version of llm_judge that processes examples concurrently."""
     eval_model_outputs = json.load(open(data_path, "r"))
-    reference_outputs = json.load(open("data/alpaca_reference.json", "r"))
+    data_ref_path = data_path.replace("llm-research", "reference")
+    reference_outputs = json.load(open(data_ref_path, "r"))
 
     eval_model_name = eval_model_outputs[0]["generator"]
 
