@@ -1,4 +1,6 @@
+from peft import PeftModel
 from vllm import LLM, SamplingParams
+from vllm.lora.request import LoRARequest
 from typing import Any, Callable, List
 from datasets import load_dataset
 import datasets
@@ -34,6 +36,7 @@ def evaluate_vllm(
     prompts: List[str],
     ground_truths: List[str],
     eval_sampling_params: SamplingParams,
+    lora_request : LoRARequest | None = None,
     reward_fn: Callable[[str, Any], dict[str, float]] | None = None,
     dump_data: bool = True,
 ) -> None:
@@ -41,7 +44,9 @@ def evaluate_vllm(
         reward_fn = lambda resp, gt: r1_zero_reward_fn(resp, gt, False)
     batch_size = 32
     # get gpu memory maximum
-    gpu_memory_max = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)  # in GB
+    gpu_memory_max = torch.cuda.get_device_properties(0).total_memory / (
+        1024**3
+    )  # in GB
     if gpu_memory_max >= 48:
         batch_size = 128
     elif gpu_memory_max >= 24:
@@ -53,13 +58,16 @@ def evaluate_vllm(
         outputs = vllm_model.generate(
             batch_prompts,
             sampling_params=eval_sampling_params,
+            lora_request=lora_request,
         )
         for output in outputs:
             gen_text: str = output.outputs[0].text
             responses.append(gen_text)
 
     eval_entries: List[EvalEntry] = []
-    for ground_truth, resp in tqdm(zip(ground_truths, responses), total=len(responses), desc="evaluating responses"):
+    for ground_truth, resp in tqdm(
+        zip(ground_truths, responses), total=len(responses), desc="evaluating responses"
+    ):
         reward_dict = reward_fn(resp, ground_truth)
 
         resp_answer = parse(resp)
@@ -84,29 +92,41 @@ def evaluate_vllm(
     total_entries = len(eval_entries)
     avg_reward = total_rewards / total_entries if total_entries > 0 else 0.0
     avg_reward_v2 = total_rewards_v2 / total_entries if total_entries > 0 else 0.0
-    avg_formatting_reward = total_formatting_rewards / total_entries if total_entries > 0 else 0.0
+    avg_formatting_reward = (
+        total_formatting_rewards / total_entries if total_entries > 0 else 0.0
+    )
     print_and_log("===== Evaluation Results =====")
     print_and_log(f"Average Reward over {total_entries} samples: {avg_reward:.4f}")
-    print_and_log(f"Average Reward v2 over {total_entries} samples: {avg_reward_v2:.4f}")
-    print_and_log(f"Average Formatting Reward over {total_entries} samples: {avg_formatting_reward:.4f}")
+    print_and_log(
+        f"Average Reward v2 over {total_entries} samples: {avg_reward_v2:.4f}"
+    )
+    print_and_log(
+        f"Average Formatting Reward over {total_entries} samples: {avg_formatting_reward:.4f}"
+    )
 
     if not dump_data:
         return
 
     with open("data/math_baseline_eval_results.pkl", "wb") as f:
         pickle.dump(eval_entries, f)
-    
+
 
 @memory.cache
 def get_evaluation_samples(limit: int, offset: int) -> tuple[List[str], List[str]]:
     ds = load_dataset("hkust-nlp/dart-math-uniform")
-    train: datasets.Dataset = ds["train"] # type: ignore
+    train: datasets.Dataset = ds["train"]  # type: ignore
     prompts, ground_truths = extract_prompt_and_response(train, limit, offset)
     return prompts, ground_truths
 
+
 def get_evaluation_sample_params(n: int = 1, max_tokens: int = 2048) -> SamplingParams:
     sampling_params = SamplingParams(
-        temperature=1.0, top_p=1.0, max_tokens=max_tokens, min_tokens=4, stop=["\n"], seed=42,
+        temperature=1.0,
+        top_p=1.0,
+        max_tokens=max_tokens,
+        min_tokens=4,
+        stop=["\n"],
+        seed=42,
         n=n,
     )
     sampling_params.stop = ["</answer>"]
@@ -121,14 +141,23 @@ if __name__ == "__main__":
     import random
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--seed", type=int, default=42, help="Random seed for evaluation.")
+    parser.add_argument(
+        "-s", "--seed", type=int, default=42, help="Random seed for evaluation."
+    )
     parser.add_argument(
         "--limit", type=int, default=512, help="Number of samples to evaluate on."
     )
     parser.add_argument(
         "--offset", type=int, default=4096, help="Offset for selecting samples."
     )
-    parser.add_argument("-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID to evaluate.")
+    parser.add_argument(
+        "-m",
+        "--model_id",
+        type=str,
+        default="Qwen/Qwen2.5-Math-1.5B",
+        help="Model ID to evaluate.",
+    )
+    parser.add_argument("--lora", type=str, default=None, help="LoRA adapter to use.")
     args = parser.parse_args()
     os.makedirs("data", exist_ok=True)
 
@@ -145,15 +174,29 @@ if __name__ == "__main__":
     sampling_params = get_evaluation_sample_params()
 
     from vllm.model_executor import set_random_seed as vllm_set_random_seed
+
     vllm_set_random_seed(seed)
-    model = LLM(model=f"models/{args.model_id}", 
-                dtype=torch.bfloat16, # type: ignore
-                enable_prefix_caching=True,
-                gpu_memory_utilization=0.85)
+    model = LLM(
+        model=f"models/{args.model_id}",
+        dtype=torch.bfloat16,  # type: ignore
+        enable_prefix_caching=True,
+        gpu_memory_utilization=0.85,
+    )
+
+    if args.lora is not None:
+        lora_request = LoRARequest(
+            lora_name=args.lora,  
+            lora_path=f"models/{args.lora}",
+            lora_int_id=1,
+        )
+    else:
+        lora_request = None
+
     evaluate_vllm(
         vllm_model=model,
         prompts=prompts,
         ground_truths=ground_truths,
+        lora_request=lora_request,
         eval_sampling_params=sampling_params,
     )
 
