@@ -386,6 +386,7 @@ if __name__ == "__main__":
         labels,
         resp_mask,
         eval_function=eval_fn,
+        print_entropy=use_lora,
     )
     end_time = time.time()
     minutes = (end_time - start_time) / 60.0
