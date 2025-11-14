@@ -48,9 +48,9 @@ def evaluate_vllm(
         1024**3
     )  # in GB
     if gpu_memory_max >= 64:
-        batch_size = 64 / 8 * batch_size
+        batch_size = 128
     elif gpu_memory_max >= 24:
-        batch_size = 24 / 8 * batch_size
+        batch_size = 64
     num_batches = (len(prompts) + batch_size - 1) // batch_size
     responses: List[str] = []
     for i in tqdm(range(num_batches), desc="generating responses"):
