@@ -23,6 +23,14 @@ class EvalEntry:
     ground_truth: str
     reward: float
 
+ft_prompt_template = """Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+{instruction}
+
+### Response:
+"""
+
 
 def extract_mmlu_answer(response: str) -> str | None:
     if "The correct answer is" not in response:
@@ -39,7 +47,7 @@ def extract_mmlu_answer(response: str) -> str | None:
     return None
 
 
-def gen_mmlu_prompt(example: dict) -> dict:
+def gen_mmlu_prompt(example: dict, is_fine_tuned: bool = False) -> dict:
     system_prompt = """# Instruction
 Below is a list of conversations between a human and an AI assistant (you).
 Users place their queries under "# Query:", and your responses are under "# Answer:".
@@ -68,13 +76,21 @@ Answer:"""
         question=example["question"],
         options=example["choices"],
     )
-    return {"prompt": system_prompt.format(instruction=prompt)}
+    if is_fine_tuned:
+        prompt = ft_prompt_template.format(instruction=prompt)
+    else:
+        prompt = system_prompt.format(instruction=prompt)
+    return {"prompt": prompt}
 
 
-def gen_gsm8k_prompt(example: dict) -> dict:
-    prompt = """{question}
+def gen_gsm8k_prompt(example: dict, is_fine_tuned: bool = False) -> dict:
+    prompt_template = """{question}
 Answer:"""
-    return {"prompt": prompt.format(question=example["question"])}
+    if is_fine_tuned:
+        prompt = ft_prompt_template.format(instruction=example["question"])
+    else:
+        prompt = prompt_template.format(question=example["question"])
+    return {"prompt": prompt}
 
 
 def mmlu_reward(response: str, ground_truth: str) -> float:
@@ -187,6 +203,7 @@ def main(
     ),
     batch_size: int = typer.Option(32, "-b", help="Batch size for evaluation"),
 ):
+    is_fine_tuned: bool = "fine-tuned" in model_id.lower()
     ground_truths: List[str] = []
     prompts: List[str] = []
     eval_sampling_params = None
@@ -195,13 +212,13 @@ def main(
         test: Dataset = ds[split]  # type: ignore
         if limit > 0:
             test = test.select(range(limit))
-        test = test.map(gen_mmlu_prompt)
+        test = test.map(lambda x : gen_mmlu_prompt(x, is_fine_tuned=is_fine_tuned))
         options = ["A", "B", "C", "D"]
         ground_truths = list(map(lambda x: options[x], test["answer"]))
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=1024, temperature=0.0, stop=["```"]
         )
-        prompts = test["prompt"]  # type: ignore
+        prompts = test["prompt"]
     elif dataset == "gsm8k":
         ds = load_dataset("data/gsm8k")
         if split == "dev":
@@ -209,18 +226,22 @@ def main(
         test: Dataset = ds[split]  # type: ignore
         if limit > 0:
             test = test.select(range(limit))
-        test = test.map(gen_gsm8k_prompt)
+        test = test.map(lambda x : gen_gsm8k_prompt(x, is_fine_tuned=is_fine_tuned))
         ground_truths = test["answer"]
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=1024, temperature=0.0, stop=None
         )
-        prompts = test["prompt"]  # type: ignore
+        prompts = test["prompt"]
     elif dataset == "alpaca":
         ds = load_dataset("data/alpaca_eval")
         test = ds["test"] # type: ignore
         if limit > 0:
             test = test.select(range(limit))
-        prompts = test["instruction"]  
+        if is_fine_tuned:
+            test = test.map(lambda x: {"prompt": ft_prompt_template.format(instruction=x["instruction"])})
+            prompts = test["prompt"]
+        else:
+            prompts = test["instruction"]
         ground_truths = test["output"] 
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=1024, temperature=0.0, stop=None
@@ -230,7 +251,11 @@ def main(
         test = ds["train"] # type: ignore
         if limit > 0:
             test = test.select(range(limit))  # type: ignore
-        prompts = test["prompts_final"]
+        if is_fine_tuned:
+            test = test.map(lambda x: {"prompt": ft_prompt_template.format(instruction=x["prompts_final"])})
+            prompts = test["prompt"]
+        else:
+            prompts = test["prompts_final"]
         ground_truths = [""] * len(prompts) # dummy ground truths for sst
         eval_sampling_params = get_evaluation_sample_params(
             1, max_tokens=1024, temperature=0.0, stop=None
