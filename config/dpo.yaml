@@ -1,4 +1,4 @@
-model_id: "models/Qwen/Qwen2.5-0.5B"
+model_id: "models/LLM-Research/Meta-Llama-3.1-8B-fine-tuned"
 lr: 1e-6
 gradient_accumulation_steps: 64
-use_compile: true
+use_compile: false
