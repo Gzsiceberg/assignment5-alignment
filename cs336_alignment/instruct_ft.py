@@ -222,6 +222,11 @@ def main(
                 continue
             input_ids: torch.Tensor = batch["input_ids"]
             labels: torch.Tensor = batch["labels"]
+
+            """
+            TODO: do we need response masking here?
+            """
+
             assert input_ids.shape == (
                 batch_size,
                 seq_len,
