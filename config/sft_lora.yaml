@@ -1,8 +1,8 @@
 num_epochs: 2
-learning_rate: 5e-3
+learning_rate: 5e-4
 gradient_accumulation_steps: 8
 micro_batch_size: 8
 eval_interval: 1
 LoraParaConfig:
-  r: 6
+  r: 4
   alpha: 12
