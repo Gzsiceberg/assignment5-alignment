@@ -65,27 +65,15 @@ def sft_microbatch_train_step(
     response_mask: torch.Tensor,
     gradient_accumulation_steps: int,
     normalize_constant: float = 1.0,
+    use_mean: bool = False,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
 
-    batch_size = policy_log_probs.shape[0]
-    loss = -masked_normalize(policy_log_probs, response_mask, normalize_constant)
-    loss /= gradient_accumulation_steps
-    loss /= batch_size
-    # with torch.autocast(device_type="cuda:0", enabled=False):
+    if use_mean:
+        loss = -masked_mean(policy_log_probs, response_mask) / (normalize_constant * gradient_accumulation_steps)
+    else:
+        loss = -masked_normalize(policy_log_probs, response_mask, normalize_constant * gradient_accumulation_steps)
     loss.backward()
     return loss, {}
-
-
-def sft_microbatch_eval_step(
-    policy_log_probs: torch.Tensor,
-    response_mask: torch.Tensor,
-    normalize_constant: float = 1.0,
-) -> torch.Tensor:
-
-    batch_size = policy_log_probs.shape[0]
-    loss = -masked_normalize(policy_log_probs, response_mask, normalize_constant)
-    loss /= batch_size
-    return loss
 
 
 def _tokenize_data(

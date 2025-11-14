@@ -209,7 +209,7 @@ def train_sft(
             policy_log_probs,
             response_mask,
             gradient_accumulation_steps,
-            normalize_constant=1.0,
+            use_mean=True
         )
 
     print_and_log(
@@ -338,7 +338,7 @@ if __name__ == "__main__":
     train_device = "cuda:0"
     llm: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         f"models/{sft_config.model_id}",
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
