@@ -176,11 +176,20 @@ if __name__ == "__main__":
     from vllm.model_executor import set_random_seed as vllm_set_random_seed
 
     vllm_set_random_seed(seed)
+    if args.lora is not None:
+        lora_config = {
+            "enable_lora": True,
+            "max_loras": 1,
+            "max_lora_rank": 16,
+        }
+    else:
+        lora_config = {}
     model = LLM(
         model=f"models/{args.model_id}",
         dtype=torch.bfloat16,  # type: ignore
         enable_prefix_caching=True,
         gpu_memory_utilization=0.85,
+        **lora_config,
     )
 
     if args.lora is not None:
