@@ -105,12 +105,8 @@ def do_grad_accumulate(
     total_loss = torch.tensor(0.0, device=train_device)
     total_entropy = torch.tensor(0.0, device=train_device)
     total_meta_info = {}
-    for micro_iter in trange(
-        gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False
-    ):
-        batch_input_ids, batch_labels, batch_resp_mask, extra_data = get_data_batch_fn(
-            micro_iter, micro_batch_size
-        )
+    for micro_iter in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
+        batch_input_ids, batch_labels, batch_resp_mask, extra_data = get_data_batch_fn(micro_iter, micro_batch_size)
         sample_content_length = batch_input_ids.shape[1]
         assert batch_input_ids.shape == (micro_batch_size, sample_content_length)
         assert batch_labels.shape == (micro_batch_size, sample_content_length)
@@ -131,7 +127,10 @@ def do_grad_accumulate(
                         micro_batch_size,
                         sample_content_length,
                     )
-                    total_entropy += masked_mean(token_entropy, batch_resp_mask, protect_zero_division=True) / gradient_accumulation_steps
+                    total_entropy += (
+                        masked_mean(token_entropy, batch_resp_mask, protect_zero_division=True)
+                        / gradient_accumulation_steps
+                    )
 
             assert log_probs.shape == (micro_batch_size, sample_content_length)
             loss, meta_info = micro_batch_train_step_fn(
@@ -196,33 +195,18 @@ def train_sft(
         b_resp_mask = b_resp_mask.to(train_device)
         return b_inputs, b_labels, b_resp_mask, {}
 
-    def micro_batch_train_step_fn(
-        meta_info, policy_log_probs, response_mask, gradient_accumulation_steps
-    ):
-        return sft_microbatch_train_step(
-            policy_log_probs,
-            response_mask,
-            gradient_accumulation_steps,
-            use_mean=True
-        )
+    def micro_batch_train_step_fn(meta_info, policy_log_probs, response_mask, gradient_accumulation_steps):
+        return sft_microbatch_train_step(policy_log_probs, response_mask, gradient_accumulation_steps, use_mean=True)
 
-    print_and_log(
-        f"Total training steps: {training_steps} batch size: {iter_batch_size} example count: {sample_count}"
-    )
-    eval_interval = (
-        sft_config.eval_interval * sample_count // iter_batch_size
-        if sft_config.eval_interval > 0
-        else 0
-    )
+    print_and_log(f"Total training steps: {training_steps} batch size: {iter_batch_size} example count: {sample_count}")
+    eval_interval = sft_config.eval_interval * sample_count // iter_batch_size if sft_config.eval_interval > 0 else 0
     if eval_interval > 0:
         print_and_log(f"Evaluation interval (in steps): {eval_interval}")
 
     start_time = time.time()
     if use_lr_scheduler:
         warmup_steps = int(0.02 * training_steps)
-        lr_scheduler = get_cosine_schedule_with_warmup(
-            optimizer, warmup_steps, training_steps
-        )
+        lr_scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, training_steps)
     else:
         lr_scheduler = None
     for st in (pbar := trange(training_steps, desc="SFT Training Steps")):
@@ -237,15 +221,11 @@ def train_sft(
         )
 
         if sft_config.clip_gradients > 0.0:
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=sft_config.clip_gradients
-            )
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=sft_config.clip_gradients)
         else:
             grad_norm = torch.tensor(0.0, device=train_device)
 
-        current_lr = (
-            lr_scheduler.get_last_lr()[0] if lr_scheduler else sft_config.learning_rate
-        )
+        current_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler else sft_config.learning_rate
         optimizer.step()
         if lr_scheduler:
             lr_scheduler.step()
@@ -257,16 +237,12 @@ def train_sft(
         pbar.set_description(f"Loss: {total_loss.item():.4f} lr: {current_lr:.6f}")  # type: ignore
 
         is_last_step = st == training_steps - 1
-        if eval_function is not None and (
-            (st + 1) % eval_interval == 0 or is_last_step
-        ):
+        if eval_function is not None and ((st + 1) % eval_interval == 0 or is_last_step):
             print_and_log(f"Running evaluation at step {st+1}...")
             eval_function(model)
 
     end_time = time.time()
-    print_and_log(
-        f"Training time for {training_steps} steps: {end_time - start_time:.2f} seconds."
-    )
+    print_and_log(f"Training time for {training_steps} steps: {end_time - start_time:.2f} seconds.")
 
 
 def generate_eval_function() -> Callable[[torch.nn.Module], None]:
@@ -293,13 +269,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument(
-        "-c", "--config", type=str, required=False, help="Path to config file"
-    )
+    parser.add_argument("-c", "--config", type=str, required=False, help="Path to config file")
     parser.add_argument("-e", "--eval", action="store_true", help="Run evaluation only")
-    parser.add_argument(
-        "-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID"
-    )
+    parser.add_argument("-m", "--model_id", type=str, default="Qwen/Qwen2.5-Math-1.5B", help="Model ID")
     args = parser.parse_args()
     config = load_config_from_file(args.config)
     config_name = os.path.splitext(os.path.basename(args.config))[0]
@@ -317,9 +289,7 @@ if __name__ == "__main__":
         sft_config.model_id = args.model_id
     is_eval_only = args.eval
     print_and_log(f"SFT Config: {sft_config}")
-    print_and_log(
-        f"Lora Config: {lora_config}" if use_lora else "No LoRA configuration provided."
-    )
+    print_and_log(f"Lora Config: {lora_config}" if use_lora else "No LoRA configuration provided.")
 
     seed = args.seed
     torch.manual_seed(seed)
