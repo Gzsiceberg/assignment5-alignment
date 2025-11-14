@@ -47,10 +47,10 @@ def evaluate_vllm(
     gpu_memory_max = torch.cuda.get_device_properties(0).total_memory / (
         1024**3
     )  # in GB
-    if gpu_memory_max >= 48:
-        batch_size = 128
+    if gpu_memory_max >= 64:
+        batch_size = 64 / 8 * batch_size
     elif gpu_memory_max >= 24:
-        batch_size = 64
+        batch_size = 24 / 8 * batch_size
     num_batches = (len(prompts) + batch_size - 1) // batch_size
     responses: List[str] = []
     for i in tqdm(range(num_batches), desc="generating responses"):
