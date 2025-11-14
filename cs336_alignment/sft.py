@@ -26,6 +26,7 @@ from cs336_alignment.math_baseline import (
     get_evaluation_sample_params,
     get_evaluation_samples,
 )
+from cs336_alignment.lora_helper import apply_lora
 
 
 def get_batch(
@@ -67,8 +68,12 @@ def cleanup():
 
 
 def get_data_batch(
-    sample_count: int, micro_batch_size: int, sample_content_length: int,
-    input_ids: torch.Tensor, labels: torch.Tensor, resp_mask: torch.Tensor,
+    sample_count: int,
+    micro_batch_size: int,
+    sample_content_length: int,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    resp_mask: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     random_index = np.random.randint(0, sample_count, size=micro_batch_size)
     batch_input_ids, batch_labels, batch_resp_mask = (
@@ -81,30 +86,42 @@ def get_data_batch(
     assert batch_resp_mask.shape == (micro_batch_size, sample_content_length)
     return batch_input_ids, batch_labels, batch_resp_mask
 
+
 def do_grad_accumulate(
-    train_device,
-    llm,
-    get_data_batch_fn: Callable[[int, int], tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]],
-    micro_batch_train_step_fn: Callable[[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, int], tuple[torch.Tensor, dict[str, torch.Tensor]]],
-    print_entropy,
-    gradient_accumulation_steps,
-    micro_batch_size,
+    train_device: str,
+    llm: torch.nn.Module,
+    get_data_batch_fn: Callable[
+        [int, int],
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]],
+    ],
+    micro_batch_train_step_fn: Callable[
+        [dict[str, torch.Tensor], torch.Tensor, torch.Tensor, int],
+        tuple[torch.Tensor, dict[str, torch.Tensor]],
+    ],
+    print_entropy: bool,
+    gradient_accumulation_steps: int,
+    micro_batch_size: int,
 ):
     total_loss = torch.tensor(0.0, device=train_device)
     total_entropy = torch.tensor(0.0, device=train_device)
     total_meta_info = {}
-    for micro_iter in trange(gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False):
-        batch_input_ids, batch_labels, batch_resp_mask, extra_data = get_data_batch_fn(micro_iter, micro_batch_size)
+    for micro_iter in trange(
+        gradient_accumulation_steps, desc="Gradient Accumulation Steps", leave=False
+    ):
+        batch_input_ids, batch_labels, batch_resp_mask, extra_data = get_data_batch_fn(
+            micro_iter, micro_batch_size
+        )
         sample_content_length = batch_input_ids.shape[1]
         assert batch_input_ids.shape == (micro_batch_size, sample_content_length)
         assert batch_labels.shape == (micro_batch_size, sample_content_length)
         assert batch_resp_mask.shape == (micro_batch_size, sample_content_length)
 
-        with torch.autocast(device_type=train_device, dtype=torch.bfloat16):
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             results = get_response_log_probs(
-                llm, batch_input_ids, 
-                batch_labels, 
-                return_token_entropy=print_entropy  # type: ignore
+                llm,
+                batch_input_ids,
+                batch_labels,
+                return_token_entropy=print_entropy,
             )
             log_probs = results["log_probs"]
             if print_entropy:
@@ -123,13 +140,16 @@ def do_grad_accumulate(
                     total_entropy += avg_token_entropy / gradient_accumulation_steps
 
             assert log_probs.shape == (micro_batch_size, sample_content_length)
-            loss, meta_info = micro_batch_train_step_fn(extra_data, log_probs, batch_resp_mask, gradient_accumulation_steps)
-            for k, v in meta_info.items():
-                if k not in total_meta_info:
-                    total_meta_info[k] = v.detach() 
-                else:
-                    total_meta_info[k] += v.detach()
-            total_loss += loss.detach()
+            loss, meta_info = micro_batch_train_step_fn(
+                extra_data, log_probs, batch_resp_mask, gradient_accumulation_steps
+            )
+            with torch.no_grad():
+                total_loss += loss.detach()
+                for k, v in meta_info.items():
+                    if k not in total_meta_info:
+                        total_meta_info[k] = v.detach()
+                    else:
+                        total_meta_info[k] += v.detach()
     return total_loss, total_entropy, total_meta_info
 
 
@@ -146,47 +166,57 @@ def train_sft(
     use_lr_scheduler: bool = True,
 ):
     print_and_log("-" * 80)
-    sample_count = input_ids.shape[0]
-    sample_content_length = input_ids.shape[1]
+    sample_count, sample_content_length = input_ids.shape[0], input_ids.shape[1]
     gradient_accumulation_steps = sft_config.gradient_accumulation_steps
     micro_batch_size = sft_config.micro_batch_size
-    example_count = sample_count
 
     iter_batch_size = micro_batch_size * gradient_accumulation_steps
-    if example_count < iter_batch_size:
-        gradient_accumulation_steps = max(1, example_count // micro_batch_size)
+    if sample_count < iter_batch_size:
+        gradient_accumulation_steps = max(1, sample_count // micro_batch_size)
         iter_batch_size = micro_batch_size * gradient_accumulation_steps
 
-    total_training_examples = example_count * sft_config.num_epochs
+    total_training_examples = sample_count * sft_config.num_epochs
     if total_training_examples < iter_batch_size:
         iter_batch_size = total_training_examples
     training_steps = total_training_examples // iter_batch_size
 
     if optimizer is None:
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=sft_config.learning_rate, fused=True
+            model.parameters(),
+            lr=sft_config.learning_rate,
+            fused=True,
+            betas=(0.9, 0.95),
         )
-    
+
     def get_data_batch_fn(micro_iter, micro_batch_size):
         b_inputs, b_labels, b_resp_mask = get_data_batch(
-            sample_count, micro_batch_size, sample_content_length, input_ids, labels, resp_mask)
+            sample_count,
+            micro_batch_size,
+            sample_content_length,
+            input_ids,
+            labels,
+            resp_mask,
+        )
         b_inputs = b_inputs.to(train_device)
         b_labels = b_labels.to(train_device)
-        b_resp_mask = b_resp_mask.to(train_device) 
+        b_resp_mask = b_resp_mask.to(train_device)
         return b_inputs, b_labels, b_resp_mask, {}
-    
+
     def micro_batch_train_step_fn(
         meta_info, policy_log_probs, response_mask, gradient_accumulation_steps
     ):
         return sft_microbatch_train_step(
-            policy_log_probs, response_mask, gradient_accumulation_steps, normalize_constant=1.0
+            policy_log_probs,
+            response_mask,
+            gradient_accumulation_steps,
+            normalize_constant=1.0,
         )
 
     print_and_log(
-        f"Total training steps: {training_steps} batch size: {iter_batch_size} example count: {example_count}"
+        f"Total training steps: {training_steps} batch size: {iter_batch_size} example count: {sample_count}"
     )
     eval_interval = (
-        sft_config.eval_interval * example_count // iter_batch_size
+        sft_config.eval_interval * sample_count // iter_batch_size
         if sft_config.eval_interval > 0
         else 0
     )
@@ -209,7 +239,7 @@ def train_sft(
             micro_batch_train_step_fn=micro_batch_train_step_fn,
             print_entropy=print_entropy,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            micro_batch_size=micro_batch_size
+            micro_batch_size=micro_batch_size,
         )
 
         if sft_config.clip_gradients > 0.0:
@@ -219,7 +249,9 @@ def train_sft(
         else:
             grad_norm = torch.tensor(0.0, device=train_device)
 
-        current_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler else sft_config.learning_rate
+        current_lr = (
+            lr_scheduler.get_last_lr()[0] if lr_scheduler else sft_config.learning_rate
+        )
         optimizer.step()
         if lr_scheduler:
             lr_scheduler.step()
@@ -243,106 +275,23 @@ def train_sft(
     )
 
 
-def apply_lora(model: PreTrainedModel, lora_config: LoraParaConfig) -> torch.nn.Module:
-    from peft import LoraConfig, get_peft_model
-    peft_config = LoraConfig(
-        r=lora_config.r,
-        lora_alpha=lora_config.alpha,
-        lora_dropout=lora_config.dropout,
-        target_modules=lora_config.target_modules,
-        bias="none",
-        task_type="CAUSAL_LM",
+def generate_eval_function() -> Callable[[torch.nn.Module], None]:
+    sampling_params: SamplingParams = get_evaluation_sample_params()
+    prompts, ground_truths = get_evaluation_samples(256, 4096)
+    print_and_log("Initializing vLLM model for evaluation...")
+    vllm_model: LLM = init_vllm(
+        model_id=f"models/{sft_config.model_id}",
+        device="cuda:1" if not is_eval_only else "cuda:0",
+        seed=seed,
+        gpu_memory_utilization=0.85,
     )
-    peft_model = get_peft_model(model, peft_config)
-    trainable, total = 0, 0
-    for n, p in peft_model.named_parameters():
-        total += p.numel()
-        if p.requires_grad:
-            trainable += p.numel()
-    print_and_log(f"Trainable params: {trainable/1e6:.2f}M | Total: {total/1e6:.2f}M | Ratio: {100*trainable/total:.4f}%")
+    print_and_log("Loading policy weights into vLLM model...")
 
+    def eval_function(llm: torch.nn.Module) -> None:
+        load_policy_into_vllm_instance(llm, vllm_model)
+        evaluate_vllm(vllm_model, prompts, ground_truths, sampling_params)
 
-    # Collect layers where LoRA is applied and layers without LoRA
-    applied_lora_types = {}  # layer_type -> count
-    layers_without_lora = {}  # layer_type -> param_count
-    
-    # Helper function to extract layer type (remove layer numbers and base_model prefix)
-    def get_layer_type(layer_path: str) -> str:
-        # Remove base_model.model prefix if present
-        path = layer_path.replace("base_model.model.", "")
-        # Remove .base_layer suffix (added by PEFT for original weights)
-        path = path.replace(".base_layer", "")
-        # Remove layer numbers like "layers.0.", "layers.19." etc.
-        import re
-        path = re.sub(r'\.layers\.\d+\.', '.layers.X.', path)
-        path = re.sub(r'^layers\.\d+\.', 'layers.X.', path)
-        return path
-    
-    # First pass: find all layers with LoRA
-    for n, p in peft_model.named_parameters():
-        if "lora_A" in n or "lora_B" in n:
-            # Extract the base layer path (before .lora_A or .lora_B)
-            layer_path = n.rsplit(".lora_", 1)[0]
-            layer_type = get_layer_type(layer_path)
-            applied_lora_types[layer_type] = applied_lora_types.get(layer_type, 0) + 1
-    
-    # Second pass: find all layers without LoRA
-    for n, p in peft_model.named_parameters():
-        # Skip LoRA parameters themselves
-        if "lora_A" in n or "lora_B" in n:
-            continue
-        
-        # Get the layer path (remove .weight, .bias, etc.)
-        if ".weight" in n or ".bias" in n:
-            layer_path = n.rsplit(".", 1)[0]
-        else:
-            layer_path = n
-        
-        layer_type = get_layer_type(layer_path)
-        
-        # Check if this layer type has LoRA applied
-        has_lora = layer_type in applied_lora_types
-        
-        if not has_lora:
-            if layer_type not in layers_without_lora:
-                layers_without_lora[layer_type] = 0
-            layers_without_lora[layer_type] += p.numel()
-    
-    print_and_log(f"\nLoRA applied layer types ({len(applied_lora_types)} types):")
-    for layer_type in sorted(applied_lora_types.keys()):
-        count = applied_lora_types[layer_type]
-        print_and_log(f"  ✓ {layer_type} (x{count})")
-    
-    total_params_without_lora = sum(layers_without_lora.values())
-    ratio_without_lora = 100 * total_params_without_lora / total if total > 0 else 0
-    print_and_log(f"\nLayer types WITHOUT LoRA ({len(layers_without_lora)} types, {total_params_without_lora/1e6:.2f}M params, {ratio_without_lora:.2f}% of total):")
-    for layer_type in sorted(layers_without_lora.keys()):
-        param_count = layers_without_lora[layer_type]
-        param_ratio = 100 * param_count / total if total > 0 else 0
-        print_and_log(f"  ✗ {layer_type}: {param_count/1e6:.4f}M params ({param_ratio:.4f}%)")
-    
-    # Estimate memory usage for training with bfloat16 and AdamW optimizer
-    print_and_log("\n=== Memory Estimation (bfloat16 + AdamW) ===")
-    
-    # Model memory: base model (bfloat16) + trainable params (bfloat16)
-    base_model_memory_gb = total * 2 / 1e9  # 2 bytes per param (bfloat16)
-    trainable_memory_gb = trainable * 2 / 1e9  # 2 bytes per trainable param
-    
-    # AdamW optimizer states: momentum and variance (float32 for both)
-    optimizer_memory_gb = trainable * 4 * 2 / 1e9  # 4 bytes * 2 states (momentum + variance)
-    
-    # Gradients (same dtype as trainable params, bfloat16)
-    gradient_memory_gb = trainable * 2 / 1e9  # 2 bytes per trainable param
-    
-    total_memory_gb = base_model_memory_gb + trainable_memory_gb + optimizer_memory_gb + gradient_memory_gb
-    
-    print_and_log(f"Model (base + trainable): {base_model_memory_gb:.2f} GB")
-    print_and_log(f"Gradients (bfloat16): {gradient_memory_gb:.2f} GB")
-    print_and_log(f"AdamW states (float32): {optimizer_memory_gb:.2f} GB")
-    print_and_log(f"Total estimated: {total_memory_gb:.2f} GB")
-    print_and_log(f"Note: Activation memory depends on batch size and sequence length")
-    
-    return peft_model
+    return eval_function
 
 
 if __name__ == "__main__":
@@ -372,21 +321,20 @@ if __name__ == "__main__":
     sft_config = SftConfig(**config)
     if args.model_id:
         sft_config.model_id = args.model_id
+    is_eval_only = args.eval
     print_and_log(f"SFT Config: {sft_config}")
-    print_and_log(f"Lora Config: {lora_config}" if use_lora else "No LoRA configuration provided.")
+    print_and_log(
+        f"Lora Config: {lora_config}" if use_lora else "No LoRA configuration provided."
+    )
 
     seed = args.seed
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    if torch.cuda.is_available():
-        torch.set_float32_matmul_precision("high")
-
     # warning: flash-attn currently only supports certain CUDA and PyTorch versions.
     # uv add flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.4.11/flash_attn-2.8.3%2Bcu128torch2.5-cp312-cp312-linux_x86_64.whl" }
     print_and_log("Loading model and tokenizer...")
-    is_eval_only = args.eval
     train_device = "cuda:0"
     llm: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         f"models/{sft_config.model_id}",
@@ -394,6 +342,7 @@ if __name__ == "__main__":
         attn_implementation="flash_attention_2",
         device_map={"": train_device},
     )
+    tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
     if is_eval_only:
         llm.eval()  # set model to evaluation mode
     else:
@@ -414,30 +363,14 @@ if __name__ == "__main__":
     print_and_log(f"Input IDs shape: {input_ids.shape}")
     assert input_ids.shape == labels.shape == resp_mask.shape
 
+    eval_fn = None
     if sft_config.eval_interval > 0 and (torch.cuda.device_count() > 1 or is_eval_only):
-        sampling_params: SamplingParams = get_evaluation_sample_params()
-        prompts, ground_truths = get_evaluation_samples(256, 4096)
-        print_and_log("Initializing vLLM model for evaluation...")
-        vllm_model: LLM = init_vllm(
-            model_id=f"models/{args.model_id}",
-            device="cuda:1" if not is_eval_only else "cuda:0",
-            seed=seed,
-            gpu_memory_utilization=0.85,
-        )
-        print_and_log("Loading policy weights into vLLM model...")
-
-        def eval_function(llm: PreTrainedModel) -> None:
-            load_policy_into_vllm_instance(llm, vllm_model)
-            evaluate_vllm(
-                vllm_model, prompts, ground_truths, sampling_params
-            )
+        eval_fn = generate_eval_function()
 
     if is_eval_only:
         print_and_log("Evaluation only mode, exiting after evaluation.")
         cleanup()
         exit(0)
-
-    tokenizer = AutoTokenizer.from_pretrained(f"models/{sft_config.model_id}")
 
     if use_lora:
         assert lora_config is not None
@@ -446,18 +379,24 @@ if __name__ == "__main__":
         model = llm
 
     # if sft_config.compile_model:
+    # torch.set_float32_matmul_precision("high")
     #     print_and_log("Compiling model...")
     #     model = torch.compile(model)  # type: ignore
 
+    start_time = time.time()
     train_sft(
         sft_config,
         train_device,
-        model, # type: ignore
+        model,
         input_ids,
         labels,
         resp_mask,
-        eval_function=eval_function if "eval_function" in globals() else None, # type: ignore
+        eval_function=eval_fn,
     )
+    end_time = time.time()
+    minutes = (end_time - start_time) / 60.0
+    print_and_log(f"SFT training completed in {minutes:.2f} minutes.")
+
     llm.save_pretrained(save_directory=output_dir)  # type: ignore
     tokenizer.save_pretrained(save_directory=output_dir)
 
