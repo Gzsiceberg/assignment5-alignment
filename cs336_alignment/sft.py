@@ -131,13 +131,7 @@ def do_grad_accumulate(
                         micro_batch_size,
                         sample_content_length,
                     )
-                    avg_token_entropy = masked_mean(
-                        token_entropy,
-                        batch_resp_mask,
-                        dim=1,
-                        protect_zero_division=True,
-                    ).mean()
-                    total_entropy += avg_token_entropy / gradient_accumulation_steps
+                    total_entropy += masked_mean(token_entropy, batch_resp_mask, protect_zero_division=True) / gradient_accumulation_steps
 
             assert log_probs.shape == (micro_batch_size, sample_content_length)
             loss, meta_info = micro_batch_train_step_fn(
