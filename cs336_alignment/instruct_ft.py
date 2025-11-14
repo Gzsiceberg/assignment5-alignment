@@ -286,7 +286,7 @@ def main(
                 )
 
     print_and_log("Final evaluation after training completion:")
-    evaluate_model_on_dataset(llm, val_loader)
+    evaluate_model_on_dataset(llm, val_loader, 0.2)
 
     if not is_test:
         # Save the fine-tuned model
